@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/assafvayner/eyebrowse"
+
+[workspace.dependencies]
+wgpu = "29"
+bytemuck = { version = "1", features = ["derive"] }
+half = { version = "2", features = ["bytemuck"] }
+thiserror = "2"
+pollster = "0.4"
+log = "0.4"
