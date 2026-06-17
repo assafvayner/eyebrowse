@@ -14,8 +14,46 @@ use eyebrowse_gpu::{add, copy_range, Device, Recorder, Tensor};
 use eyebrowse_kernels::{embedding_f16, linear_f16w, mul_scalar};
 use eyebrowse_load::{Config, WeightSource};
 use eyebrowse_nn::{Attention, KvCache, Linear, Mlp, RmsNorm, Rope};
+use serde::Deserialize;
 
 use crate::upload::{raw_to_f32, upload_f16, upload_f32};
+
+/// Gemma 4's architecture-specific config fields, parsed once from `Config.extra` (the raw
+/// `config.json`). Anything not in the normalized [`Config`] lives here; serde ignores the many
+/// other keys in the file.
+#[derive(Deserialize)]
+struct Gemma4Config {
+    /// Q/KV head_dim for global ("full_attention") layers; local layers use `Config.head_dim`.
+    global_head_dim: usize,
+    /// Per-layer attention regime: `"full_attention"` => global, anything else => local.
+    layer_types: Vec<String>,
+    rope_parameters: Gemma4Rope,
+    /// `cap * tanh(x / cap)` applied to LM-head logits; `None`/`0` disables.
+    #[serde(default)]
+    final_logit_softcapping: Option<f64>,
+    /// Per-layer input-embedding width (E2B/E4B variants). Nonzero => unsupported by this loader.
+    #[serde(default)]
+    hidden_size_per_layer_input: usize,
+    /// MoE controls; either set => unsupported by this dense-only loader.
+    #[serde(default)]
+    num_experts: Option<usize>,
+    #[serde(default)]
+    enable_moe_block: bool,
+}
+
+#[derive(Deserialize)]
+struct Gemma4Rope {
+    sliding_attention: Gemma4RopeEntry,
+    full_attention: Gemma4RopeEntry,
+}
+
+#[derive(Deserialize)]
+struct Gemma4RopeEntry {
+    rope_theta: f64,
+    /// Fraction of head_dim that is rotated (global "proportional" RoPE); required for global.
+    #[serde(default)]
+    partial_rotary_factor: Option<f64>,
+}
 
 /// Which RoPE/head-dim regime a layer belongs to.
 #[derive(Clone, Copy, PartialEq)]
@@ -57,10 +95,6 @@ pub fn load(dev: &Arc<Device>, src: &dyn WeightSource, max_seq: usize) -> Result
     Gemma4::load(dev, src, max_seq)
 }
 
-fn cfg_u64(extra: &serde_json::Value, key: &str) -> Option<usize> {
-    extra.get(key).and_then(|v| v.as_u64()).map(|v| v as usize)
-}
-
 impl Gemma4 {
     /// Build a KV cache sized for this model and the given max sequence length, honoring the
     /// per-layer head_dim (global layers are wider than local ones).
@@ -71,31 +105,18 @@ impl Gemma4 {
     /// Load all weights from a `WeightSource` and precompute both RoPE tables up to `max_seq`.
     pub fn load(dev: &Arc<Device>, src: &dyn WeightSource, max_seq: usize) -> Result<Self> {
         let cfg = src.config().clone();
-        let extra = &cfg.extra;
+        let gc: Gemma4Config = serde_json::from_value(cfg.extra.clone())
+            .map_err(|e| EyebrowseError::Load(format!("gemma4 config: {e}")))?;
 
         // Reject the configurations this dense loader does not implement.
-        if cfg_u64(extra, "hidden_size_per_layer_input").unwrap_or(0) != 0 {
+        if gc.hidden_size_per_layer_input != 0 {
             return Err(EyebrowseError::UnsupportedConfig(
                 "gemma4 hidden_size_per_layer_input != 0 (per-layer input embeddings)".to_string(),
             ));
         }
-        if extra
-            .get("num_experts")
-            .map(|v| !v.is_null())
-            .unwrap_or(false)
-            && cfg_u64(extra, "num_experts").unwrap_or(0) != 0
-        {
+        if gc.num_experts.unwrap_or(0) != 0 || gc.enable_moe_block {
             return Err(EyebrowseError::UnsupportedConfig(
-                "gemma4 MoE (num_experts) is not supported".to_string(),
-            ));
-        }
-        if extra
-            .get("enable_moe_block")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        {
-            return Err(EyebrowseError::UnsupportedConfig(
-                "gemma4 MoE (enable_moe_block) is not supported".to_string(),
+                "gemma4 MoE is not supported".to_string(),
             ));
         }
 
@@ -107,14 +128,8 @@ impl Gemma4 {
             cfg.rms_eps,
         );
         let local_hd = cfg.head_dim;
-        let global_hd = cfg_u64(extra, "global_head_dim").ok_or_else(|| {
-            EyebrowseError::Load("gemma4 config missing global_head_dim".to_string())
-        })?;
-
-        let layer_types = extra
-            .get("layer_types")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| EyebrowseError::Load("gemma4 config missing layer_types".to_string()))?;
+        let global_hd = gc.global_head_dim;
+        let layer_types = &gc.layer_types;
 
         let f16 = |name: &str| -> Result<Tensor> { upload_f16(dev, &src.raw(name)?) };
         let f32t = |name: &str| -> Result<Tensor> { upload_f32(dev, &src.raw(name)?) };
@@ -128,7 +143,6 @@ impl Gemma4 {
         for l in 0..cfg.n_layers {
             let is_global = layer_types
                 .get(l)
-                .and_then(|v| v.as_str())
                 .map(|s| s == "full_attention")
                 .unwrap_or(false);
             let (kind, hd) = if is_global {
@@ -214,21 +228,12 @@ impl Gemma4 {
         // RoPE: local layers use full rotary at the local head_dim; global layers use a partial
         // ("proportional") rotary at the global head_dim where only the first `rope_angles`
         // frequency pairs are active.
-        let rp = &extra["rope_parameters"];
-        let theta_local = rp["sliding_attention"]["rope_theta"]
-            .as_f64()
-            .ok_or_else(|| {
-                EyebrowseError::Load(
-                    "gemma4 missing rope_parameters.sliding_attention.rope_theta".to_string(),
-                )
-            })? as f32;
-        let theta_global = rp["full_attention"]["rope_theta"].as_f64().ok_or_else(|| {
-            EyebrowseError::Load(
-                "gemma4 missing rope_parameters.full_attention.rope_theta".to_string(),
-            )
-        })? as f32;
-        let partial_rotary_factor = rp["full_attention"]["partial_rotary_factor"]
-            .as_f64()
+        let theta_local = gc.rope_parameters.sliding_attention.rope_theta as f32;
+        let theta_global = gc.rope_parameters.full_attention.rope_theta as f32;
+        let partial_rotary_factor = gc
+            .rope_parameters
+            .full_attention
+            .partial_rotary_factor
             .ok_or_else(|| {
                 EyebrowseError::Load(
                     "gemma4 missing rope_parameters.full_attention.partial_rotary_factor"
@@ -241,10 +246,7 @@ impl Gemma4 {
         let rope_global = Rope::build_partial(dev, max_seq, global_hd, rope_angles, theta_global);
 
         let embed_scale = (hidden as f32).sqrt();
-        let logit_cap = extra
-            .get("final_logit_softcapping")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0) as f32;
+        let logit_cap = gc.final_logit_softcapping.unwrap_or(0.0) as f32;
 
         Ok(Gemma4 {
             dev: dev.clone(),
