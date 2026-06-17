@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>loading</title>
+  </head>
+  <body>
+    <pre id="out">running…</pre>
+    <script type="module">
+      import init, { run_add_demo } from './pkg-gpu/eyebrowse_gpu.js';
+      (async () => {
+        const out = document.getElementById('out');
+        try {
+          await init();
+          const r = await run_add_demo();
+          window.__RESULT__ = r;
+          document.title = 'DONE:' + r;
+          out.textContent = 'result = ' + r;
+        } catch (e) {
+          window.__ERROR__ = String(e);
+          document.title = 'ERR';
+          out.textContent = 'error = ' + e;
+          console.error(e);
+        }
+      })();
+    </script>
+  </body>
+</html>
