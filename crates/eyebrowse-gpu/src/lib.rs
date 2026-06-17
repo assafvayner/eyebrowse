@@ -6,6 +6,9 @@ mod kernel;
 mod recorder;
 mod tensor;
 
+#[cfg(target_arch = "wasm32")]
+mod wasm_demo;
+
 pub use device::Device;
 pub use kernel::{add, dispatch};
 pub use recorder::Recorder;
