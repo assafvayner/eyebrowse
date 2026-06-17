@@ -342,6 +342,7 @@ fn build_config(
         rope_theta,
         tie_word_embeddings,
         max_seq,
+        extra: serde_json::Value::Null,
     })
 }
 

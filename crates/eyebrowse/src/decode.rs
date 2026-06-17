@@ -2,12 +2,12 @@
 //! token ids, leaving encode/decode to the caller.
 
 use eyebrowse_core::Result;
-use eyebrowse_models::Decoder;
+use eyebrowse_models::Model;
 
 /// Greedy-generate `max_new` tokens after `input_ids`, returning the generated ids. Allocates a
 /// fresh KV cache sized to `max_seq` (must be >= `input_ids.len() + max_new`).
 pub async fn greedy_generate(
-    model: &Decoder,
+    model: &Model,
     input_ids: &[u32],
     max_new: usize,
     max_seq: usize,

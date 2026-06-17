@@ -3,14 +3,14 @@ use std::path::Path;
 use eyebrowse_core::Result;
 use eyebrowse_gpu::Device;
 use eyebrowse_load::{decode, encode, load_tokenizer, SafeTensorsSource};
-use eyebrowse_models::{load_model, Decoder};
+use eyebrowse_models::{load_model, Model};
 use tokenizers::Tokenizer;
 
 use crate::decode::greedy_generate;
 
 /// A native text-generation engine: a loaded model + tokenizer + a fixed KV-cache capacity.
 pub struct Generator {
-    model: Decoder,
+    model: Model,
     tok: Tokenizer,
     max_seq: usize,
 }
