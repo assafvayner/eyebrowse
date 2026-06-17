@@ -22,12 +22,28 @@ pub fn pack_f16(x: &[f32]) -> Vec<u32> {
     out
 }
 
+/// Usage flags shared by every tensor buffer: readable/writable in shaders and copyable both ways.
+const TENSOR_USAGE: wgpu::BufferUsages = wgpu::BufferUsages::STORAGE
+    .union(wgpu::BufferUsages::COPY_SRC)
+    .union(wgpu::BufferUsages::COPY_DST);
+
 /// A typed handle over a GPU storage buffer. Owns no host-side copy of the data.
+///
+/// The backing buffer is drawn from (and, on drop, returned to) the device's buffer pool, so
+/// per-step intermediates are recycled rather than reallocated every forward pass.
 pub struct Tensor {
     pub(crate) dev: Arc<Device>,
     pub buffer: wgpu::Buffer,
     pub shape: Vec<usize>,
     pub dtype: DType,
+}
+
+impl Drop for Tensor {
+    fn drop(&mut self) {
+        // `wgpu::Buffer` is a reference-counted handle; the clone keeps the underlying allocation
+        // alive in the pool after this handle is gone.
+        self.dev.recycle_buffer(self.buffer.clone());
+    }
 }
 
 impl Tensor {
@@ -43,18 +59,34 @@ impl Tensor {
         &self.dev
     }
 
-    /// Allocate an uninitialized storage buffer (usable as kernel input/output and copyable).
+    /// Allocate an uninitialized storage buffer (usable as kernel input/output and copyable),
+    /// drawing from the device buffer pool when a matching free buffer exists. Contents are
+    /// unspecified; the caller must fully write the buffer before reading it.
     pub fn empty(dev: &Arc<Device>, shape: &[usize], dtype: DType) -> Tensor {
         let numel: usize = shape.iter().product();
         let size = (numel * dtype.size()).max(dtype.size()) as u64;
-        let buffer = dev.device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let buffer = dev.acquire_buffer(size, TENSOR_USAGE);
+        Tensor {
+            dev: dev.clone(),
+            buffer,
+            shape: shape.to_vec(),
+            dtype,
+        }
+    }
+
+    /// Allocate a host-initialized tensor: a fresh (non-pooled) buffer written via
+    /// `queue.write_buffer`. These bypass the pool deliberately — reusing a pooled buffer for a
+    /// second host upload in the same unsubmitted batch would corrupt the first (writes collapse).
+    fn from_host(dev: &Arc<Device>, shape: &[usize], dtype: DType, bytes: &[u8]) -> Tensor {
+        let numel: usize = shape.iter().product();
+        assert_eq!(
+            bytes.len(),
+            numel * dtype.size(),
+            "from_host: data len != shape numel"
+        );
+        let size = (numel * dtype.size()).max(dtype.size()) as u64;
+        let buffer = dev.create_buffer(size, TENSOR_USAGE);
+        dev.queue.write_buffer(&buffer, 0, bytes);
         Tensor {
             dev: dev.clone(),
             buffer,
@@ -65,20 +97,12 @@ impl Tensor {
 
     /// Allocate an f32 tensor and upload `data` via `queue.write_buffer`.
     pub fn from_f32(dev: &Arc<Device>, shape: &[usize], data: &[f32]) -> Tensor {
-        let t = Tensor::empty(dev, shape, DType::F32);
-        assert_eq!(data.len(), t.numel(), "from_f32: data len != shape numel");
-        dev.queue
-            .write_buffer(&t.buffer, 0, bytemuck::cast_slice(data));
-        t
+        Tensor::from_host(dev, shape, DType::F32, bytemuck::cast_slice(data))
     }
 
     /// Allocate a u32 tensor (used for packed f16 weights and integer ids) and upload `data`.
     pub fn from_u32(dev: &Arc<Device>, shape: &[usize], data: &[u32]) -> Tensor {
-        let t = Tensor::empty(dev, shape, DType::U32);
-        assert_eq!(data.len(), t.numel(), "from_u32: data len != shape numel");
-        dev.queue
-            .write_buffer(&t.buffer, 0, bytemuck::cast_slice(data));
-        t
+        Tensor::from_host(dev, shape, DType::U32, bytemuck::cast_slice(data))
     }
 
     /// Upload f32 `data` as a packed-u32 f16 tensor (the kernels' weight storage format):
