@@ -93,16 +93,16 @@ impl Qwen3Model {
                     n_heads * head_dim,
                     hidden,
                 ),
-                q_norm: RmsNorm::new(
+                q_norm: Some(RmsNorm::new(
                     f32t(&format!("{p}.self_attn.q_norm.weight"))?,
                     eps,
                     head_dim,
-                ),
-                k_norm: RmsNorm::new(
+                )),
+                k_norm: Some(RmsNorm::new(
                     f32t(&format!("{p}.self_attn.k_norm.weight"))?,
                     eps,
                     head_dim,
-                ),
+                )),
                 n_heads,
                 n_kv_heads: n_kv,
                 head_dim,
