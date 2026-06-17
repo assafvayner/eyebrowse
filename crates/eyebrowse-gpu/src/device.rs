@@ -16,7 +16,7 @@ pub struct Device {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub limits: wgpu::Limits,
-    pub(crate) pipelines: Mutex<HashMap<&'static str, Arc<CachedPipeline>>>,
+    pub(crate) pipelines: Mutex<HashMap<String, Arc<CachedPipeline>>>,
 }
 
 impl Device {
