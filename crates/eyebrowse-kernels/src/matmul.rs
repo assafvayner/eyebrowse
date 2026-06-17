@@ -79,6 +79,69 @@ fn main(@builtin(local_invocation_id) lid: vec3<u32>,
 }
 "#;
 
+// Like matmul_f16w but the weight is in HF Linear layout [N=out, K=in] (row-major), so
+// `y[m,o] = sum_k a[m,k] * w[o,k]` — no transpose needed at load time.
+const LINEAR_F16W_WGSL: &str = r#"
+@group(0) @binding(0) var<storage, read_write> a: array<f32>;     // [M,K] activations
+@group(0) @binding(1) var<storage, read_write> b: array<u32>;     // [N,K] f16 packed 2/word
+@group(0) @binding(2) var<storage, read_write> c: array<f32>;     // [M,N]
+@group(0) @binding(3) var<storage, read_write> dims: array<u32>;  // [M,K,N]
+
+fn wld(idx: u32) -> f32 {
+    let pair = unpack2x16float(b[idx >> 1u]);
+    if ((idx & 1u) == 0u) { return pair.x; } else { return pair.y; }
+}
+
+var<workgroup> As: array<f32, 256>;
+var<workgroup> Bs: array<f32, 256>;
+
+@compute @workgroup_size(16, 16)
+fn main(@builtin(local_invocation_id) lid: vec3<u32>,
+        @builtin(workgroup_id) wid: vec3<u32>) {
+    let M = dims[0]; let K = dims[1]; let N = dims[2];
+    let row = wid.y * 16u + lid.y;
+    let col = wid.x * 16u + lid.x;
+    var acc = 0.0;
+    let n_tiles = (K + 15u) / 16u;
+    for (var t = 0u; t < n_tiles; t = t + 1u) {
+        let a_col = t * 16u + lid.x;
+        let b_row = t * 16u + lid.y;
+        As[lid.y * 16u + lid.x] = select(0.0, a[row * K + a_col], row < M && a_col < K);
+        Bs[lid.y * 16u + lid.x] = select(0.0, wld(col * K + b_row), col < N && b_row < K);
+        workgroupBarrier();
+        for (var p = 0u; p < 16u; p = p + 1u) {
+            acc = acc + As[lid.y * 16u + p] * Bs[p * 16u + lid.x];
+        }
+        workgroupBarrier();
+    }
+    if (row < M && col < N) { c[row * N + col] = acc; }
+}
+"#;
+
+/// Linear layer GEMM with HF weight layout: weight `w` is packed-u32 f16 of logical `[out, in]`,
+/// computing `c[m, out] = a[m, in] * w[out, in]^T`. f32 activations/accumulation.
+pub fn linear_f16w(
+    rec: &mut Recorder,
+    a: &Tensor,
+    w: &Tensor,
+    c: &Tensor,
+    m: usize,
+    in_f: usize,
+    out_f: usize,
+) {
+    let dims = Tensor::from_u32(rec.device(), &[3], &[m as u32, in_f as u32, out_f as u32]);
+    let gx = (out_f as u32).div_ceil(TILE);
+    let gy = (m as u32).div_ceil(TILE);
+    dispatch(
+        rec,
+        "linear_f16w",
+        LINEAR_F16W_WGSL,
+        "main",
+        &[&a.buffer, &w.buffer, &c.buffer, &dims.buffer],
+        [gx, gy, 1],
+    );
+}
+
 /// f32 GEMM: `c[m,n] = a[m,k] * b[k,n]` (all row-major). Records into `rec`.
 pub fn matmul(rec: &mut Recorder, a: &Tensor, b: &Tensor, c: &Tensor, m: usize, k: usize, n: usize) {
     let dims = Tensor::from_u32(rec.device(), &[3], &[m as u32, k as u32, n as u32]);
@@ -121,7 +184,7 @@ pub fn matmul_f16w(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{cpu_matmul, pack_f16, rel_l2, round_f16, test_device};
+    use crate::testutil::{cpu_linear, cpu_matmul, pack_f16, rel_l2, round_f16, test_device};
     use eyebrowse_core::DType;
 
     #[test]
@@ -174,6 +237,24 @@ mod tests {
         let got = pollster::block_on(ct.to_f32()).unwrap();
         // Reference multiplies with f16-rounded weights (kernel reads f16).
         let want = cpu_matmul(&a, &round_f16(&b), m, k, n);
+        assert!(rel_l2(&got, &want) < 2e-3, "got {got:?} want {want:?}");
+    }
+
+    #[test]
+    fn linear_f16w_matches_cpu() {
+        let d = test_device();
+        let (m, in_f, out_f) = (5usize, 33usize, 7usize); // in not a multiple of 16
+        let x: Vec<f32> = (0..m * in_f).map(|i| i as f32 * 0.01 - 0.2).collect();
+        let w: Vec<f32> = (0..out_f * in_f).map(|i| i as f32 * 0.005 - 0.3).collect();
+        let xt = Tensor::from_f32(&d, &[m, in_f], &x);
+        let packed = pack_f16(&w);
+        let wt = Tensor::from_u32(&d, &[packed.len()], &packed);
+        let ct = Tensor::empty(&d, &[m, out_f], DType::F32);
+        let mut rec = Recorder::new(&d);
+        linear_f16w(&mut rec, &xt, &wt, &ct, m, in_f, out_f);
+        rec.submit();
+        let got = pollster::block_on(ct.to_f32()).unwrap();
+        let want = cpu_linear(&x, &round_f16(&w), m, in_f, out_f);
         assert!(rel_l2(&got, &want) < 2e-3, "got {got:?} want {want:?}");
     }
 }

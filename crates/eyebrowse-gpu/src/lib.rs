@@ -12,7 +12,7 @@ mod wasm_demo;
 pub use device::Device;
 pub use kernel::{add, dispatch};
 pub use recorder::Recorder;
-pub use tensor::Tensor;
+pub use tensor::{pack_f16, Tensor};
 
 pub use eyebrowse_core::{DType, EyebrowseError, Result};
 

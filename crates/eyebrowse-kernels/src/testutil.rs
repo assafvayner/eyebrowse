@@ -63,6 +63,22 @@ pub fn round_f16(x: &[f32]) -> Vec<f32> {
     x.iter().map(|v| half::f16::from_f32(*v).to_f32()).collect()
 }
 
+/// CPU reference for a Linear layer with HF weight layout `w[out, in]` (no bias):
+/// `y[m, o] = sum_k x[m, k] * w[o, k]`.
+pub fn cpu_linear(x: &[f32], w: &[f32], m: usize, in_f: usize, out_f: usize) -> Vec<f32> {
+    let mut y = vec![0.0f32; m * out_f];
+    for i in 0..m {
+        for o in 0..out_f {
+            let mut acc = 0.0f32;
+            for k in 0..in_f {
+                acc += x[i * in_f + k] * w[o * in_f + k];
+            }
+            y[i * out_f + o] = acc;
+        }
+    }
+    y
+}
+
 /// CPU reference for RMSNorm over rows of `[rows, dim]`.
 pub fn cpu_rmsnorm(x: &[f32], w: &[f32], rows: usize, dim: usize, eps: f32) -> Vec<f32> {
     let mut out = vec![0.0f32; rows * dim];
