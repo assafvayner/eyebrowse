@@ -90,6 +90,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 "#;
 
 /// Causal GQA attention over full sequences. q `[h,s,hd]`, k/v `[hkv,s,hd]`, out `[h,s,hd]`.
+#[allow(clippy::too_many_arguments)]
 pub fn attn_prefill(
     rec: &mut Recorder,
     q: &Tensor,
@@ -137,7 +138,13 @@ pub fn attn_decode(
         &format!("attn_decode_hd{hd}"),
         &DECODE_TMPL.replace("__HD__", &hd.to_string()),
         "main",
-        &[&q.buffer, &kcache.buffer, &vcache.buffer, &o.buffer, &dims.buffer],
+        &[
+            &q.buffer,
+            &kcache.buffer,
+            &vcache.buffer,
+            &o.buffer,
+            &dims.buffer,
+        ],
         [(h as u32).div_ceil(64), 1, 1],
     );
 }

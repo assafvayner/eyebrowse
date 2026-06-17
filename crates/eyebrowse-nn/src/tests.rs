@@ -97,7 +97,11 @@ fn linear_matches_cpu() {
     let got = read(&out);
 
     let want = cpu_linear(&x, &round_f16(&w), m, in_f, out_f);
-    assert!(rel_l2(&got, &want) < 2e-3, "rel_l2 = {}", rel_l2(&got, &want));
+    assert!(
+        rel_l2(&got, &want) < 2e-3,
+        "rel_l2 = {}",
+        rel_l2(&got, &want)
+    );
 }
 
 #[test]
@@ -117,7 +121,11 @@ fn rmsnorm_matches_cpu() {
     let got = read(&out);
 
     let want = cpu_rmsnorm(&x, &w, rows, dim, eps);
-    assert!(rel_l2(&got, &want) < 1e-4, "rel_l2 = {}", rel_l2(&got, &want));
+    assert!(
+        rel_l2(&got, &want) < 1e-4,
+        "rel_l2 = {}",
+        rel_l2(&got, &want)
+    );
 }
 
 #[test]
@@ -142,7 +150,11 @@ fn embedding_matches_cpu() {
         let src = id as usize * dim;
         want[row * dim..row * dim + dim].copy_from_slice(&table16[src..src + dim]);
     }
-    assert!(rel_l2(&got, &want) < 2e-3, "rel_l2 = {}", rel_l2(&got, &want));
+    assert!(
+        rel_l2(&got, &want) < 2e-3,
+        "rel_l2 = {}",
+        rel_l2(&got, &want)
+    );
 }
 
 #[test]
@@ -177,7 +189,11 @@ fn mlp_matches_cpu() {
     let u = cpu_linear(&x, &round_f16(&wu), rows, hidden, inter);
     let h: Vec<f32> = g.iter().zip(u.iter()).map(|(a, b)| silu(*a) * *b).collect();
     let want = cpu_linear(&h, &round_f16(&wd), rows, inter, hidden);
-    assert!(rel_l2(&got, &want) < 2e-3, "rel_l2 = {}", rel_l2(&got, &want));
+    assert!(
+        rel_l2(&got, &want) < 2e-3,
+        "rel_l2 = {}",
+        rel_l2(&got, &want)
+    );
 }
 
 #[test]
