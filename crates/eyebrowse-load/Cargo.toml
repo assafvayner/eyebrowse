@@ -12,7 +12,4 @@ safetensors = "0.4"
 half = { workspace = true }
 bytemuck = { workspace = true }
 thiserror.workspace = true
-
-# The tokenizer (onig C dep) is native-only; wasm builds skip it.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokenizers = { version = "0.20", default-features = false, features = ["onig"] }

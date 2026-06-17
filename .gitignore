@@ -1,10 +1,5 @@
 /target
 **/*.rs.bk
-node_modules/
-pkg/
-web/pkg/
-web/pkg-gpu/
-web/dist/
 *.safetensors
 /models/
 /models/gguf/

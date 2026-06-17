@@ -118,27 +118,6 @@ impl SafeTensorsSource {
             locations,
         })
     }
-
-    /// Build a source from in-memory bytes: a single `model.safetensors` blob plus the config
-    /// JSON. Used on wasm where there is no filesystem (the host fetches the bytes and hands
-    /// them in). The `safetensors` buffer is moved in and retained for tensor access.
-    pub fn from_bytes(config_json: &str, safetensors: Vec<u8>) -> Result<Self> {
-        let config = config_from_hf_json(config_json)?;
-        let shard = "model.safetensors".to_string();
-        let st = SafeTensors::deserialize(&safetensors)
-            .map_err(|e| EyebrowseError::Load(format!("parsing safetensors: {e}")))?;
-        let mut locations = HashMap::new();
-        for name in st.names() {
-            locations.insert(name.to_string(), shard.clone());
-        }
-        let mut shards = HashMap::new();
-        shards.insert(shard, safetensors);
-        Ok(Self {
-            config,
-            shards,
-            locations,
-        })
-    }
 }
 
 impl WeightSource for SafeTensorsSource {

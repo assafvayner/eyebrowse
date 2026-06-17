@@ -63,7 +63,7 @@ impl Tensor {
         }
     }
 
-    /// Allocate an f32 tensor and upload `data` via `queue.write_buffer` (the WASM-preferred path).
+    /// Allocate an f32 tensor and upload `data` via `queue.write_buffer`.
     pub fn from_f32(dev: &Arc<Device>, shape: &[usize], data: &[f32]) -> Tensor {
         let t = Tensor::empty(dev, shape, DType::F32);
         assert_eq!(data.len(), t.numel(), "from_f32: data len != shape numel");
@@ -91,8 +91,8 @@ impl Tensor {
         Tensor::from_u32(dev, &[packed.len()], &packed)
     }
 
-    /// Read the buffer back to the host as f32. Async: on native it drives the queue to
-    /// completion; on wasm the `.await` yields to the browser which resolves the mapping.
+    /// Read the buffer back to the host as f32. Async: it drives the queue to completion and
+    /// awaits the buffer mapping.
     pub async fn to_f32(&self) -> Result<Vec<f32>> {
         let bytes = self.read_bytes().await?;
         Ok(bytemuck::cast_slice(&bytes).to_vec())
@@ -120,7 +120,6 @@ impl Tensor {
         staging.slice(..).map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
         });
-        #[cfg(not(target_arch = "wasm32"))]
         let _ = self.dev.device.poll(wgpu::PollType::wait_indefinitely());
         rx.recv_async()
             .await

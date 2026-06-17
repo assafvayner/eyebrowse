@@ -143,16 +143,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "console_error_panic_hook"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
-dependencies = [
- "cfg-if",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "crossbeam-deque"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -299,19 +289,15 @@ checksum = "d817e038c30374a4bcb22f94d0a8a0e216958d4c3dcde369b1439fec4bdda6e6"
 name = "eyebrowse"
 version = "0.1.0"
 dependencies = [
- "console_error_panic_hook",
  "eyebrowse-core",
  "eyebrowse-gpu",
  "eyebrowse-kernels",
  "eyebrowse-load",
  "eyebrowse-models",
  "eyebrowse-nn",
- "js-sys",
  "pollster",
  "serde_json",
  "tokenizers",
- "wasm-bindgen",
- "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -326,16 +312,11 @@ name = "eyebrowse-gpu"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "console_error_panic_hook",
  "eyebrowse-core",
  "flume",
  "half",
- "js-sys",
  "log",
  "pollster",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
  "wgpu",
 ]
 
