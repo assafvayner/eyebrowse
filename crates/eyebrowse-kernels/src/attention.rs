@@ -12,7 +12,7 @@ const PREFILL_TMPL: &str = r#"
 @group(0) @binding(1) var<storage, read_write> k: array<f32>;    // [S, Hkv, HD]
 @group(0) @binding(2) var<storage, read_write> v: array<f32>;    // [S, Hkv, HD]
 @group(0) @binding(3) var<storage, read_write> o: array<f32>;    // [S, H, HD]
-@group(0) @binding(4) var<storage, read_write> dims: array<u32>; // [H, Hkv, S]
+@group(0) @binding(4) var<storage, read_write> dims: array<u32>; // [H, Hkv, S, scale_bits]
 
 const HD: u32 = __HD__u;
 
@@ -26,7 +26,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let group = H / Hkv;
     let kvh = h / group;
     let qbase = (i * H + h) * HD;
-    let scale = 1.0 / sqrt(f32(HD));
+    let scale = bitcast<f32>(dims[3]);
 
     var acc: array<f32, __HD__>;
     for (var d = 0u; d < HD; d = d + 1u) { acc[d] = 0.0; }
@@ -54,7 +54,7 @@ const DECODE_TMPL: &str = r#"
 @group(0) @binding(1) var<storage, read_write> kc: array<f32>;   // [MAXSEQ, Hkv, HD]
 @group(0) @binding(2) var<storage, read_write> vc: array<f32>;   // [MAXSEQ, Hkv, HD]
 @group(0) @binding(3) var<storage, read_write> o: array<f32>;    // [H, HD]
-@group(0) @binding(4) var<storage, read_write> dims: array<u32>; // [H, Hkv, pos, MAXSEQ]
+@group(0) @binding(4) var<storage, read_write> dims: array<u32>; // [H, Hkv, pos, MAXSEQ, scale_bits]
 
 const HD: u32 = __HD__u;
 
@@ -66,7 +66,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let group = H / Hkv;
     let kvh = h / group;
     let qbase = h * HD;
-    let scale = 1.0 / sqrt(f32(HD));
+    let scale = bitcast<f32>(dims[4]);
 
     var acc: array<f32, __HD__>;
     for (var d = 0u; d < HD; d = d + 1u) { acc[d] = 0.0; }
@@ -101,8 +101,13 @@ pub fn attn_prefill(
     hkv: usize,
     s: usize,
     hd: usize,
+    scale: f32,
 ) {
-    let dims = Tensor::from_u32(rec.device(), &[3], &[h as u32, hkv as u32, s as u32]);
+    let dims = Tensor::from_u32(
+        rec.device(),
+        &[4],
+        &[h as u32, hkv as u32, s as u32, scale.to_bits()],
+    );
     let total = (h * s) as u32;
     dispatch(
         rec,
@@ -127,11 +132,18 @@ pub fn attn_decode(
     pos: usize,
     hd: usize,
     max_seq: usize,
+    scale: f32,
 ) {
     let dims = Tensor::from_u32(
         rec.device(),
-        &[4],
-        &[h as u32, hkv as u32, pos as u32, max_seq as u32],
+        &[5],
+        &[
+            h as u32,
+            hkv as u32,
+            pos as u32,
+            max_seq as u32,
+            scale.to_bits(),
+        ],
     );
     dispatch(
         rec,
@@ -171,7 +183,7 @@ mod tests {
         let vt = Tensor::from_f32(&d, &[s, hkv, hd], &v);
         let ot = Tensor::empty(&d, &[s, h, hd], DType::F32);
         let mut rec = Recorder::new(&d);
-        attn_prefill(&mut rec, &qt, &kt, &vt, &ot, h, hkv, s, hd);
+        attn_prefill(&mut rec, &qt, &kt, &vt, &ot, h, hkv, s, hd, 1.0 / (hd as f32).sqrt());
         rec.submit();
         let got = pollster::block_on(ot.to_f32()).unwrap();
         let want = cpu_attn_prefill(&q, &k, &v, h, hkv, s, hd);
@@ -190,7 +202,9 @@ mod tests {
         let vt = Tensor::from_f32(&d, &[max_seq, hkv, hd], &vc);
         let ot = Tensor::empty(&d, &[h, hd], DType::F32);
         let mut rec = Recorder::new(&d);
-        attn_decode(&mut rec, &qt, &kt, &vt, &ot, h, hkv, pos, hd, max_seq);
+        attn_decode(
+            &mut rec, &qt, &kt, &vt, &ot, h, hkv, pos, hd, max_seq, 1.0 / (hd as f32).sqrt(),
+        );
         rec.submit();
         let got = pollster::block_on(ot.to_f32()).unwrap();
         let want = cpu_attn_decode(&q, &kc, &vc, h, hkv, pos, hd, max_seq);

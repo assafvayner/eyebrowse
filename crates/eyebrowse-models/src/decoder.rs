@@ -123,10 +123,12 @@ impl Decoder {
                 ),
                 q_norm,
                 k_norm,
+                v_norm: None,
                 n_heads,
                 n_kv_heads: n_kv,
                 head_dim,
                 hidden,
+                scale: 1.0 / (head_dim as f32).sqrt(),
             };
             let ln2 = RmsNorm::new(
                 f32t(&format!("{p}.post_attention_layernorm.weight"))?,

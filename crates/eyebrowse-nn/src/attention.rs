@@ -4,8 +4,9 @@ use eyebrowse_kernels::{attn_decode, attn_prefill, kv_write};
 
 use crate::{KvCache, Linear, RmsNorm, Rope};
 
-/// Grouped-query attention with RoPE and *optional* per-head QK-RMSNorm. Qwen3 sets `q_norm`/
-/// `k_norm` to `Some(..)`; Llama/Mistral-style decoders leave them `None`.
+/// Grouped-query attention with RoPE and *optional* per-head norms. Qwen3 sets `q_norm`/`k_norm`
+/// to `Some(..)`; Llama/Mistral leave them `None`. Gemma 4 additionally sets `v_norm` (a weightless
+/// RMSNorm) and `scale = 1.0`; Qwen3/Mistral use `scale = 1/√head_dim`.
 pub struct Attention {
     pub q_proj: Linear,
     pub k_proj: Linear,
@@ -13,10 +14,12 @@ pub struct Attention {
     pub o_proj: Linear,
     pub q_norm: Option<RmsNorm>,
     pub k_norm: Option<RmsNorm>,
+    pub v_norm: Option<RmsNorm>,
     pub n_heads: usize,
     pub n_kv_heads: usize,
     pub head_dim: usize,
     pub hidden: usize,
+    pub scale: f32,
 }
 
 impl Attention {
@@ -42,6 +45,10 @@ impl Attention {
         let kn = match &self.k_norm {
             Some(n) => n.forward(rec, &k, seq * self.n_kv_heads),
             None => k,
+        };
+        let v = match &self.v_norm {
+            Some(n) => n.forward(rec, &v, seq * self.n_kv_heads),
+            None => v,
         };
 
         let qr = rope.apply(rec, &qn, seq, self.n_heads, 0);
@@ -83,6 +90,7 @@ impl Attention {
             self.n_kv_heads,
             seq,
             self.head_dim,
+            self.scale,
         );
         self.o_proj.forward(rec, &o, seq)
     }
@@ -108,6 +116,10 @@ impl Attention {
         let kn = match &self.k_norm {
             Some(n) => n.forward(rec, &k, self.n_kv_heads),
             None => k,
+        };
+        let v = match &self.v_norm {
+            Some(n) => n.forward(rec, &v, self.n_kv_heads),
+            None => v,
         };
 
         let qr = rope.apply(rec, &qn, 1, self.n_heads, pos);
@@ -146,6 +158,7 @@ impl Attention {
             pos,
             self.head_dim,
             kv.max_seq,
+            self.scale,
         );
         self.o_proj.forward(rec, &o, 1)
     }
