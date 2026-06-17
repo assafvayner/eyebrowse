@@ -1,0 +1,14 @@
+/target
+**/*.rs.bk
+node_modules/
+pkg/
+web/pkg/
+web/pkg-gpu/
+web/dist/
+*.safetensors
+/models/
+.venv/
+__pycache__/
+# Qwen3-0.6B fixtures — fetched on demand via scripts/fetch-fixtures.sh, not tracked.
+crates/eyebrowse-load/tests/fixtures/qwen3-0.6b-tokenizer.json
+crates/eyebrowse-load/tests/fixtures/qwen3-0.6b-config.json
