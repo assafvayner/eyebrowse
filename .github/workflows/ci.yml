@@ -29,6 +29,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers libvulkan1 vulkan-tools
+          echo "--- installed Vulkan ICDs ---"
+          ls -la /usr/share/vulkan/icd.d/ || true
+          echo "--- vulkaninfo ---"
           vulkaninfo --summary || true
 
       - name: Format
@@ -41,7 +44,8 @@ jobs:
         run: cargo build --workspace --all-targets
 
       - name: Test
+        # Let the Vulkan loader auto-discover the lavapipe ICD mesa installs (do NOT pin
+        # VK_ICD_FILENAMES — that overrides discovery and breaks if the path differs).
         env:
           WGPU_BACKEND: vulkan
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
         run: cargo test --workspace
