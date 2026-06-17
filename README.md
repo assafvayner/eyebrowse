@@ -5,8 +5,9 @@ A lean, **extensible** model runtime written in Rust that runs neural networks o
 design favors a small set of composable primitives so adding a new model architecture is a
 self-contained module, not a rewrite.
 
-It runs **Qwen3** and **Mistral / Llama**-family text models, loaded from **safetensors or GGUF**
-(incl. Q8_0 / Q4_K_M quantization). Generation matches HuggingFace `transformers` token-for-token.
+It runs **Qwen3**, **Mistral / Llama**, and **Gemma 4 (dense)** text models, loaded from
+**safetensors or GGUF** (incl. Q8_0 / Q4_K_M quantization). Generation matches HuggingFace
+`transformers` token-for-token.
 
 ```
 $ cargo run -p eyebrowse --release --example generate
@@ -21,6 +22,7 @@ Implemented and validated (native, Metal):
 - ✅ **Qwen3-0.6B** — matches the HF greedy golden 20/20.
 - ✅ **Mistral / Llama** family (QK-norm is optional; one shared `Decoder`, arch-selected loader) — logits match HF (rel-L2 ~4e-4).
 - ✅ **GGUF loading** (Q8_0 / Q4_K / Q6_K / F16 / F32, dequantized on the CPU into the f16 upload path) — a Q8_0 GGUF of Qwen3-0.6B matches the safetensors golden 20/20.
+- ✅ **Gemma 4 (dense)** — sandwich norms, QK-norm + weightless V-norm, attn scale=1, per-layer head_dim (local/global), partial-rotary "proportional" global RoPE, GeGLU, embed×√hidden, logit softcap — logits match HF (rel-L2 ~5e-3). PLE/E2B, MoE, and sliding-window masking are deferred.
 
 ## Architecture
 
@@ -31,9 +33,9 @@ A Cargo workspace, layered bottom-up. Each crate has one responsibility:
 | `eyebrowse-core` | Shared `DType` + the crate-wide error type. |
 | `eyebrowse-gpu` | `wgpu` device, `Tensor` (a handle over a GPU buffer), a command `Recorder`, and the kernel-dispatch helper. |
 | `eyebrowse-kernels` | Hand-written WGSL compute kernels (GEMM, RMSNorm, RoPE, flash-attention, SwiGLU, embedding, KV-cache write, argmax) + native correctness tests. |
-| `eyebrowse-nn` | Composable primitives: `Linear`, `RmsNorm`, `Rope`, `Attention` (GQA + optional QK-RMSNorm + KV cache), `Mlp` (SwiGLU), `Embedding`. |
-| `eyebrowse-load` | `WeightSource` trait + **safetensors and GGUF** loaders (GGUF dequant for Q8_0/Q4_K/Q6_K), normalized HF `config.json`, and tokenizer. |
-| `eyebrowse-models` | A shared `Decoder` + thin per-architecture loaders (`qwen3`, `mistral`) selected by config arch via `load_model`. |
+| `eyebrowse-nn` | Composable primitives: `Linear`, `RmsNorm`, `Rope` (full + partial-rotary), `Attention` (GQA + optional QK/V-RMSNorm + configurable scale + KV cache), `Mlp` (SwiGLU / GeGLU), `Embedding`. |
+| `eyebrowse-load` | `WeightSource` trait + **safetensors and GGUF** loaders (GGUF dequant for Q8_0/Q4_K/Q6_K), normalized HF `config.json` (+ raw `extra` for arch-specific fields), and tokenizer. |
+| `eyebrowse-models` | A shared `Decoder` (Qwen3/Mistral) + a `Gemma4` module, exposed as a `Model` enum selected by config arch via `load_model`. |
 | `eyebrowse` | The generation runtime: greedy prefill/decode loop and the `Generator`. |
 
 ### Key design points
@@ -73,11 +75,15 @@ cargo test -p eyebrowse --release --test mistral -- --nocapture
 # GGUF: build Q8_0 + Q4_K_M fixtures of Qwen3-0.6B, then test end-to-end vs the golden
 bash scripts/make-gguf-fixtures.sh
 cargo test -p eyebrowse --release --test gguf -- --nocapture
+
+# Gemma 4 (dense): synthetic tiny model + HF logits golden
+uv run --with torch --with transformers --with safetensors golden/gen_gemma4_golden.py
+cargo test -p eyebrowse --release --test gemma4 -- --nocapture
 ```
 
 ## Roadmap
 
-- **Gemma 4** (its own effort: sandwich norms, per-layer head_dim, partial-rotary RoPE, GeGLU, V-norm, logit softcap).
+- **Gemma 4 extensions:** Per-Layer Embeddings (E2B/E4B), the MoE variant (26B), and sliding-window attention masking.
 - Native quantized matmul kernels (GGUF weights currently dequantize to f16 at load; computing on packed quants would cut memory + bandwidth).
 - More GGUF quant types (Q2_K/Q3_K/Q5_K, legacy Q4_0/Q5_0) and GGUF tokenizer extraction.
 - A second modality: an image-generation pipeline on the same runtime.

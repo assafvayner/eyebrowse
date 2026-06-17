@@ -19,6 +19,36 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+const GEGLU_WGSL: &str = r#"
+@group(0) @binding(0) var<storage, read_write> gate: array<f32>;
+@group(0) @binding(1) var<storage, read_write> up: array<f32>;
+@group(0) @binding(2) var<storage, read_write> out: array<f32>;
+@group(0) @binding(3) var<storage, read_write> params: array<u32>; // [n]
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let n = params[0];
+    let i = gid.x;
+    if (i >= n) { return; }
+    let g = gate[i];
+    let geg = 0.5 * g * (1.0 + tanh(0.7978845608028654 * (g + 0.044715 * g * g * g)));
+    out[i] = geg * up[i];
+}
+"#;
+
+const MUL_SCALAR_WGSL: &str = r#"
+@group(0) @binding(0) var<storage, read_write> x: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+@group(0) @binding(2) var<storage, read_write> params: array<u32>; // [n, s_bits]
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let n = params[0];
+    let s = bitcast<f32>(params[1]);
+    let i = gid.x;
+    if (i >= n) { return; }
+    out[i] = x[i] * s;
+}
+"#;
+
 const EMBED_WGSL: &str = r#"
 @group(0) @binding(0) var<storage, read_write> ids: array<u32>;    // [n]
 @group(0) @binding(1) var<storage, read_write> table: array<u32>;  // packed f16 [vocab*dim/2]
@@ -65,6 +95,32 @@ pub fn swiglu(rec: &mut Recorder, gate: &Tensor, up: &Tensor, out: &Tensor, n: u
         SWIGLU_WGSL,
         "main",
         &[&gate.buffer, &up.buffer, &out.buffer, &params.buffer],
+        [(n as u32).div_ceil(64), 1, 1],
+    );
+}
+
+/// GeGLU combine: `out[i] = gelu(gate[i]) * up[i]`, with the tanh approximation of GELU.
+pub fn geglu(rec: &mut Recorder, gate: &Tensor, up: &Tensor, out: &Tensor, n: usize) {
+    let params = Tensor::from_u32(rec.device(), &[1], &[n as u32]);
+    dispatch(
+        rec,
+        "geglu",
+        GEGLU_WGSL,
+        "main",
+        &[&gate.buffer, &up.buffer, &out.buffer, &params.buffer],
+        [(n as u32).div_ceil(64), 1, 1],
+    );
+}
+
+/// Scalar multiply: `out[i] = x[i] * s`.
+pub fn mul_scalar(rec: &mut Recorder, x: &Tensor, out: &Tensor, n: usize, s: f32) {
+    let params = Tensor::from_u32(rec.device(), &[2], &[n as u32, s.to_bits()]);
+    dispatch(
+        rec,
+        "mul_scalar",
+        MUL_SCALAR_WGSL,
+        "main",
+        &[&x.buffer, &out.buffer, &params.buffer],
         [(n as u32).div_ceil(64), 1, 1],
     );
 }
@@ -148,6 +204,43 @@ mod tests {
             })
             .collect();
         assert!(rel_l2(&got, &want) < 1e-5);
+    }
+
+    #[test]
+    fn geglu_matches_cpu() {
+        let d = test_device();
+        let n = 100usize;
+        let gate: Vec<f32> = (0..n).map(|i| i as f32 * 0.05 - 2.0).collect();
+        let up: Vec<f32> = (0..n).map(|i| i as f32 * 0.02 - 1.0).collect();
+        let gt = Tensor::from_f32(&d, &[n], &gate);
+        let ut = Tensor::from_f32(&d, &[n], &up);
+        let ot = Tensor::empty(&d, &[n], DType::F32);
+        let mut rec = Recorder::new(&d);
+        geglu(&mut rec, &gt, &ut, &ot, n);
+        rec.submit();
+        let got = pollster::block_on(ot.to_f32()).unwrap();
+        let want: Vec<f32> = (0..n)
+            .map(|i| {
+                let g = gate[i];
+                let geg = 0.5 * g * (1.0 + (0.7978846 * (g + 0.044715 * g * g * g)).tanh());
+                geg * up[i]
+            })
+            .collect();
+        assert!(rel_l2(&got, &want) < 1e-5);
+    }
+
+    #[test]
+    fn mul_scalar_scales() {
+        let d = test_device();
+        let x = [1.0f32, 2.0, 3.0];
+        let n = x.len();
+        let xt = Tensor::from_f32(&d, &[n], &x);
+        let ot = Tensor::empty(&d, &[n], DType::F32);
+        let mut rec = Recorder::new(&d);
+        mul_scalar(&mut rec, &xt, &ot, n, 2.5);
+        rec.submit();
+        let got = pollster::block_on(ot.to_f32()).unwrap();
+        assert_eq!(got, vec![2.5, 5.0, 7.5]);
     }
 
     #[test]

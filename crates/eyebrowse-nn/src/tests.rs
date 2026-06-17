@@ -254,10 +254,12 @@ fn prefill_decode_consistency() {
         o_proj: mk_lin(&prng(hidden * q_dim, 14), q_dim, hidden),
         q_norm: Some(mk_norm(prng(head_dim, 15))),
         k_norm: Some(mk_norm(prng(head_dim, 16))),
+        v_norm: None,
         n_heads,
         n_kv_heads,
         head_dim,
         hidden,
+        scale: 1.0 / (head_dim as f32).sqrt(),
     };
     let rope = Rope::build(&d, max_seq, head_dim, 10000.0);
 

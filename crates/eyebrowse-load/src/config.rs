@@ -18,6 +18,10 @@ pub struct Config {
     pub rope_theta: f32,
     pub tie_word_embeddings: bool,
     pub max_seq: usize,
+    /// The full source `config.json` as a JSON value, for architecture-specific fields not
+    /// captured by the typed fields above (e.g. Gemma 4's `layer_types`, `rope_parameters`).
+    /// `serde_json::Value::Null` when the source has no JSON config (e.g. GGUF).
+    pub extra: serde_json::Value,
 }
 
 /// transformers v5 nests RoPE settings here instead of using a top-level `rope_theta`.
@@ -51,6 +55,8 @@ struct HfConfig {
 pub fn config_from_hf_json(s: &str) -> Result<Config> {
     let hf: HfConfig =
         serde_json::from_str(s).map_err(|e| EyebrowseError::Load(format!("config.json: {e}")))?;
+    let extra: serde_json::Value =
+        serde_json::from_str(s).map_err(|e| EyebrowseError::Load(format!("config.json: {e}")))?;
 
     let arch = hf.model_type.unwrap_or_else(|| "unknown".to_string());
     let n_heads = hf.num_attention_heads;
@@ -74,6 +80,7 @@ pub fn config_from_hf_json(s: &str) -> Result<Config> {
         rope_theta: rope_theta as f32,
         tie_word_embeddings: hf.tie_word_embeddings,
         max_seq: hf.max_position_embeddings,
+        extra,
     })
 }
 
