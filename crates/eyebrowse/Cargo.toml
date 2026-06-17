@@ -16,3 +16,6 @@ tokenizers = { version = "0.20", default-features = false, features = ["onig"] }
 [dev-dependencies]
 pollster.workspace = true
 serde_json = "1"
+eyebrowse-gpu = { path = "../eyebrowse-gpu" }
+eyebrowse-load = { path = "../eyebrowse-load" }
+eyebrowse-models = { path = "../eyebrowse-models" }

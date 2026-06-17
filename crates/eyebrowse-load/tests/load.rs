@@ -13,7 +13,10 @@ fn fixtures_dir() -> PathBuf {
 fn parses_qwen3_config_fixture() {
     let path = fixtures_dir().join("qwen3-0.6b-config.json");
     if !path.exists() {
-        eprintln!("SKIP: {} absent (run scripts/fetch-fixtures.sh)", path.display());
+        eprintln!(
+            "SKIP: {} absent (run scripts/fetch-fixtures.sh)",
+            path.display()
+        );
         return;
     }
     let json = std::fs::read_to_string(&path).unwrap();
@@ -95,7 +98,10 @@ fn safetensors_round_trip() {
 fn tokenizer_round_trip() {
     let path = fixtures_dir().join("qwen3-0.6b-tokenizer.json");
     if !path.exists() {
-        eprintln!("SKIP: {} absent (run scripts/fetch-fixtures.sh)", path.display());
+        eprintln!(
+            "SKIP: {} absent (run scripts/fetch-fixtures.sh)",
+            path.display()
+        );
         return;
     }
     let tok = load_tokenizer(&path).unwrap();

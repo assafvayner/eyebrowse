@@ -3,14 +3,14 @@ use std::path::Path;
 use eyebrowse_core::Result;
 use eyebrowse_gpu::Device;
 use eyebrowse_load::{decode, encode, load_tokenizer, SafeTensorsSource};
-use eyebrowse_models::Qwen3Model;
+use eyebrowse_models::{load_model, Decoder};
 use tokenizers::Tokenizer;
 
 use crate::decode::greedy_generate;
 
 /// A native text-generation engine: a loaded model + tokenizer + a fixed KV-cache capacity.
 pub struct Generator {
-    model: Qwen3Model,
+    model: Decoder,
     tok: Tokenizer,
     max_seq: usize,
 }
@@ -22,7 +22,7 @@ impl Generator {
         let dir = Path::new(model_dir);
         let src = SafeTensorsSource::from_dir(dir)?;
         let dev = Device::new().await?;
-        let model = Qwen3Model::load(&dev, &src, max_seq)?;
+        let model = load_model(&dev, &src, max_seq)?;
         let tok = load_tokenizer(&dir.join("tokenizer.json"))?;
         Ok(Generator {
             model,

@@ -4,14 +4,15 @@ use eyebrowse_kernels::{attn_decode, attn_prefill, kv_write};
 
 use crate::{KvCache, Linear, RmsNorm, Rope};
 
-/// Qwen3-style grouped-query attention with per-head QK-RMSNorm and RoPE.
+/// Grouped-query attention with RoPE and *optional* per-head QK-RMSNorm. Qwen3 sets `q_norm`/
+/// `k_norm` to `Some(..)`; Llama/Mistral-style decoders leave them `None`.
 pub struct Attention {
     pub q_proj: Linear,
     pub k_proj: Linear,
     pub v_proj: Linear,
     pub o_proj: Linear,
-    pub q_norm: RmsNorm,
-    pub k_norm: RmsNorm,
+    pub q_norm: Option<RmsNorm>,
+    pub k_norm: Option<RmsNorm>,
     pub n_heads: usize,
     pub n_kv_heads: usize,
     pub head_dim: usize,
@@ -34,8 +35,14 @@ impl Attention {
         let k = self.k_proj.forward(rec, x, seq);
         let v = self.v_proj.forward(rec, x, seq);
 
-        let qn = self.q_norm.forward(rec, &q, seq * self.n_heads);
-        let kn = self.k_norm.forward(rec, &k, seq * self.n_kv_heads);
+        let qn = match &self.q_norm {
+            Some(n) => n.forward(rec, &q, seq * self.n_heads),
+            None => q,
+        };
+        let kn = match &self.k_norm {
+            Some(n) => n.forward(rec, &k, seq * self.n_kv_heads),
+            None => k,
+        };
 
         let qr = rope.apply(rec, &qn, seq, self.n_heads, 0);
         let kr = rope.apply(rec, &kn, seq, self.n_kv_heads, 0);
@@ -94,8 +101,14 @@ impl Attention {
         let k = self.k_proj.forward(rec, x, 1);
         let v = self.v_proj.forward(rec, x, 1);
 
-        let qn = self.q_norm.forward(rec, &q, self.n_heads);
-        let kn = self.k_norm.forward(rec, &k, self.n_kv_heads);
+        let qn = match &self.q_norm {
+            Some(n) => n.forward(rec, &q, self.n_heads),
+            None => q,
+        };
+        let kn = match &self.k_norm {
+            Some(n) => n.forward(rec, &k, self.n_kv_heads),
+            None => k,
+        };
 
         let qr = rope.apply(rec, &qn, 1, self.n_heads, pos);
         let kr = rope.apply(rec, &kn, 1, self.n_kv_heads, pos);

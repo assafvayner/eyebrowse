@@ -20,6 +20,12 @@ pub struct Config {
     pub max_seq: usize,
 }
 
+/// transformers v5 nests RoPE settings here instead of using a top-level `rope_theta`.
+#[derive(Deserialize)]
+struct RopeParameters {
+    rope_theta: Option<f64>,
+}
+
 #[derive(Deserialize)]
 struct HfConfig {
     model_type: Option<String>,
@@ -31,7 +37,11 @@ struct HfConfig {
     intermediate_size: usize,
     vocab_size: usize,
     rms_norm_eps: f64,
-    rope_theta: f64,
+    // Old configs use a top-level `rope_theta`; transformers v5 nests it under `rope_parameters`.
+    #[serde(default)]
+    rope_theta: Option<f64>,
+    #[serde(default)]
+    rope_parameters: Option<RopeParameters>,
     #[serde(default)]
     tie_word_embeddings: bool,
     max_position_embeddings: usize,
@@ -45,6 +55,11 @@ pub fn config_from_hf_json(s: &str) -> Result<Config> {
     let arch = hf.model_type.unwrap_or_else(|| "unknown".to_string());
     let n_heads = hf.num_attention_heads;
     let head_dim = hf.head_dim.unwrap_or(hf.hidden_size / n_heads);
+    // Resolve RoPE theta from either the top-level field or the v5 `rope_parameters` block.
+    let rope_theta = hf
+        .rope_theta
+        .or(hf.rope_parameters.and_then(|r| r.rope_theta))
+        .unwrap_or(10000.0);
 
     Ok(Config {
         arch,
@@ -56,7 +71,7 @@ pub fn config_from_hf_json(s: &str) -> Result<Config> {
         intermediate: hf.intermediate_size,
         vocab: hf.vocab_size,
         rms_eps: hf.rms_norm_eps as f32,
-        rope_theta: hf.rope_theta as f32,
+        rope_theta: rope_theta as f32,
         tie_word_embeddings: hf.tie_word_embeddings,
         max_seq: hf.max_position_embeddings,
     })
@@ -105,6 +120,27 @@ mod tests {
         assert_eq!(cfg.n_kv_heads, 2);
         assert!(cfg.tie_word_embeddings);
         assert!((cfg.rope_theta - 1_000_000.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn reads_rope_theta_from_v5_rope_parameters() {
+        // transformers v5 nests rope_theta under rope_parameters and omits the top-level field.
+        let json = r#"{
+            "model_type": "mistral",
+            "hidden_size": 128,
+            "num_hidden_layers": 2,
+            "num_attention_heads": 4,
+            "num_key_value_heads": 2,
+            "head_dim": 32,
+            "intermediate_size": 256,
+            "vocab_size": 320,
+            "rms_norm_eps": 1e-6,
+            "rope_parameters": { "rope_theta": 1000000.0, "rope_type": "default" },
+            "max_position_embeddings": 128
+        }"#;
+        let cfg = config_from_hf_json(json).unwrap();
+        assert!((cfg.rope_theta - 1_000_000.0).abs() < 1.0);
+        assert_eq!(cfg.arch, "mistral");
     }
 
     #[test]

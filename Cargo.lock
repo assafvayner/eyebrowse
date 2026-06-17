@@ -335,6 +335,7 @@ dependencies = [
 name = "eyebrowse-load"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "eyebrowse-core",
  "half",
  "safetensors",

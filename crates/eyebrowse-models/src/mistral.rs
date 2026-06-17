@@ -1,4 +1,4 @@
-//! Qwen3 dense loader: a [`Decoder`] with per-head QK-RMSNorm.
+//! Mistral / Llama-style loader: a [`Decoder`] identical to Qwen3 minus QK-norm and biases.
 
 use std::sync::Arc;
 
@@ -9,5 +9,5 @@ use eyebrowse_load::WeightSource;
 use crate::decoder::{Decoder, DecoderOpts};
 
 pub fn load(dev: &Arc<Device>, src: &dyn WeightSource, max_seq: usize) -> Result<Decoder> {
-    Decoder::load(dev, src, max_seq, DecoderOpts { has_qk_norm: true })
+    Decoder::load(dev, src, max_seq, DecoderOpts { has_qk_norm: false })
 }

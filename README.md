@@ -5,8 +5,8 @@ A lean, **extensible** model runtime written in Rust that runs neural networks o
 design favors a small set of composable primitives so adding a new model architecture is a
 self-contained module, not a rewrite.
 
-The first proof model is **Qwen3-0.6B** text generation. It generates correct text matching
-HuggingFace `transformers` token-for-token.
+It runs **Qwen3** and **Mistral / Llama**-family text models, loaded from **safetensors or GGUF**
+(incl. Q8_0 / Q4_K_M quantization). Generation matches HuggingFace `transformers` token-for-token.
 
 ```
 $ cargo run -p eyebrowse --release --example generate
@@ -16,9 +16,11 @@ OUTPUT:  Paris. The capital of Italy is Rome. The capital of Spain is Madrid. Th
 
 ## Status
 
-v1 (text generation) is implemented and validated:
+Implemented and validated (native, Metal):
 
-- ✅ Native generation on Apple Silicon (Metal) — matches the HF greedy golden 20/20.
+- ✅ **Qwen3-0.6B** — matches the HF greedy golden 20/20.
+- ✅ **Mistral / Llama** family (QK-norm is optional; one shared `Decoder`, arch-selected loader) — logits match HF (rel-L2 ~4e-4).
+- ✅ **GGUF loading** (Q8_0 / Q4_K / Q6_K / F16 / F32, dequantized on the CPU into the f16 upload path) — a Q8_0 GGUF of Qwen3-0.6B matches the safetensors golden 20/20.
 
 ## Architecture
 
@@ -29,9 +31,9 @@ A Cargo workspace, layered bottom-up. Each crate has one responsibility:
 | `eyebrowse-core` | Shared `DType` + the crate-wide error type. |
 | `eyebrowse-gpu` | `wgpu` device, `Tensor` (a handle over a GPU buffer), a command `Recorder`, and the kernel-dispatch helper. |
 | `eyebrowse-kernels` | Hand-written WGSL compute kernels (GEMM, RMSNorm, RoPE, flash-attention, SwiGLU, embedding, KV-cache write, argmax) + native correctness tests. |
-| `eyebrowse-nn` | Composable primitives: `Linear`, `RmsNorm`, `Rope`, `Attention` (GQA + QK-RMSNorm + KV cache), `Mlp` (SwiGLU), `Embedding`. |
-| `eyebrowse-load` | `WeightSource` trait + safetensors loader, normalized HF `config.json`, and tokenizer. |
-| `eyebrowse-models` | Per-architecture modules. `qwen3` assembles `eyebrowse-nn` primitives from a config. |
+| `eyebrowse-nn` | Composable primitives: `Linear`, `RmsNorm`, `Rope`, `Attention` (GQA + optional QK-RMSNorm + KV cache), `Mlp` (SwiGLU), `Embedding`. |
+| `eyebrowse-load` | `WeightSource` trait + **safetensors and GGUF** loaders (GGUF dequant for Q8_0/Q4_K/Q6_K), normalized HF `config.json`, and tokenizer. |
+| `eyebrowse-models` | A shared `Decoder` + thin per-architecture loaders (`qwen3`, `mistral`) selected by config arch via `load_model`. |
 | `eyebrowse` | The generation runtime: greedy prefill/decode loop and the `Generator`. |
 
 ### Key design points
@@ -60,15 +62,24 @@ cargo test -p eyebrowse-core -p eyebrowse-gpu -p eyebrowse-kernels -p eyebrowse-
 hf download Qwen/Qwen3-0.6B --local-dir models/qwen3-0.6b
 python golden/gen_golden.py     # writes golden/qwen3-golden.json
 
-# End-to-end vs HF golden
+# Qwen3 end-to-end vs HF golden
 cargo test -p eyebrowse --release --test generate -- --nocapture
 cargo run  -p eyebrowse --release --example generate
+
+# Mistral path: synthetic tiny model + HF logits golden
+uv run --with torch --with transformers --with safetensors golden/gen_mistral_golden.py
+cargo test -p eyebrowse --release --test mistral -- --nocapture
+
+# GGUF: build Q8_0 + Q4_K_M fixtures of Qwen3-0.6B, then test end-to-end vs the golden
+bash scripts/make-gguf-fixtures.sh
+cargo test -p eyebrowse --release --test gguf -- --nocapture
 ```
 
 ## Roadmap
 
-- A second weight format (GGUF) to exercise the loader trait against a second source.
-- Quantization (q8 → q4), reusing the packed-weight kernel pattern.
+- **Gemma 4** (its own effort: sandwich norms, per-layer head_dim, partial-rotary RoPE, GeGLU, V-norm, logit softcap).
+- Native quantized matmul kernels (GGUF weights currently dequantize to f16 at load; computing on packed quants would cut memory + bandwidth).
+- More GGUF quant types (Q2_K/Q3_K/Q5_K, legacy Q4_0/Q5_0) and GGUF tokenizer extraction.
 - A second modality: an image-generation pipeline on the same runtime.
 - Performance: kernel fusion, subgroups, fewer transient allocations.
 
