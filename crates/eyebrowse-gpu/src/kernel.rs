@@ -9,7 +9,7 @@ use crate::{Device, Recorder, Tensor};
 /// Keyed by `key` (must be stable per (wgsl, entry, n_buffers)); cached on the device.
 fn get_pipeline(
     dev: &Arc<Device>,
-    key: &'static str,
+    key: &str,
     wgsl: &str,
     entry: &str,
     n_buffers: usize,
@@ -59,7 +59,10 @@ fn get_pipeline(
             cache: None,
         });
     let cached = Arc::new(CachedPipeline { pipeline, layout });
-    dev.pipelines.lock().unwrap().insert(key, cached.clone());
+    dev.pipelines
+        .lock()
+        .unwrap()
+        .insert(key.to_string(), cached.clone());
     cached
 }
 
@@ -67,7 +70,7 @@ fn get_pipeline(
 /// given workgroup counts. Pipeline compiled once per `key` and cached.
 pub fn dispatch(
     rec: &mut Recorder,
-    key: &'static str,
+    key: &str,
     wgsl: &str,
     entry: &str,
     buffers: &[&wgpu::Buffer],
