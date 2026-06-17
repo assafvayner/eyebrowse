@@ -1,5 +1,5 @@
-//! The greedy autoregressive loop, shared by the native `Generator` and the wasm binding.
-//! Tokenizer-free (operates on token ids) so it compiles on both targets.
+//! The greedy autoregressive loop used by the `Generator`. Tokenizer-free: it operates on
+//! token ids, leaving encode/decode to the caller.
 
 use eyebrowse_core::Result;
 use eyebrowse_models::Qwen3Model;
