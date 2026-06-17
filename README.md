@@ -31,11 +31,11 @@ A Cargo workspace, layered bottom-up. Each crate has one responsibility:
 | Crate | Responsibility |
 |---|---|
 | `eyebrowse-core` | Shared `DType` + the crate-wide error type. |
-| `eyebrowse-gpu` | `wgpu` device, `Tensor` (a handle over a GPU buffer), a command `Recorder`, and the kernel-dispatch helper. |
+| `eyebrowse-gpu` | `wgpu` device (with a recyclable GPU-buffer pool), `Tensor` (a handle over a pooled GPU buffer), a command `Recorder`, and the kernel-dispatch helper. |
 | `eyebrowse-kernels` | Hand-written WGSL compute kernels (GEMM, RMSNorm, RoPE, flash-attention, SwiGLU, embedding, KV-cache write, argmax) + native correctness tests. |
 | `eyebrowse-nn` | Composable primitives: `Linear`, `RmsNorm`, `Rope` (full + partial-rotary), `Attention` (GQA + optional QK/V-RMSNorm + configurable scale + KV cache), `Mlp` (SwiGLU / GeGLU), `Embedding`. |
 | `eyebrowse-load` | `WeightSource` trait + **safetensors and GGUF** loaders (GGUF dequant for Q8_0/Q4_K/Q6_K), normalized HF `config.json` (+ raw `extra` for arch-specific fields), and tokenizer. |
-| `eyebrowse-models` | A shared `Decoder` (Qwen3/Mistral) + a `Gemma4` module, exposed as a `Model` enum selected by config arch via `load_model`. |
+| `eyebrowse-models` | A `Block` trait + one architecture-agnostic `LanguageModel` driver; per-arch modules build the block list (Qwen3/Mistral standard block, Gemma 4 block) and a few hooks, selected by config arch via `load_model`. |
 | `eyebrowse` | The generation runtime: greedy prefill/decode loop and the `Generator`. |
 
 ### Key design points
@@ -43,9 +43,14 @@ A Cargo workspace, layered bottom-up. Each crate has one responsibility:
 - **Eager execution with batched submit.** A model's `forward` is plain Rust calling kernel
   functions; a whole step records its dispatches into one command buffer and submits once,
   attacking the per-dispatch overhead that dominates WebGPU inference.
+- **Pooled GPU buffers.** Intermediate tensors draw their backing buffer from a per-device pool and
+  return it on drop, so the per-layer/per-token activations are recycled instead of reallocated
+  every forward pass.
 - **f16 weights, f32 compute.** Weights are stored as packed-`u32` f16 and unpacked in-kernel with
   `unpack2x16float` (no `shader-f16` feature needed → portable across WebGPU backends).
 - **Fixed KV cache.** Allocated up front (no mid-decode growth), seq-major `[max_seq, kv_heads, head_dim]`.
+- **On-GPU greedy decode.** The argmax runs on the GPU and reads back a single token id per step,
+  rather than transferring the full vocab logits to the host (the logits path is kept for validation).
 - **Native-first testing.** Every kernel and primitive is unit-tested on the native GPU against a
   CPU reference; the model is validated token-by-token against HF `transformers`.
 

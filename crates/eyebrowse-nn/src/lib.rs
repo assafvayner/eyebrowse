@@ -20,3 +20,5 @@ pub use rope::Rope;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod testutil;
