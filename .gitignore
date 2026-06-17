@@ -9,3 +9,5 @@ web/dist/
 /models/
 .venv/
 __pycache__/
+# Large tokenizer fixture — fetched on demand via scripts/fetch-fixtures.sh, not tracked.
+crates/eyebrowse-load/tests/fixtures/qwen3-0.6b-tokenizer.json
