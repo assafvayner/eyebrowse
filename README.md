@@ -54,6 +54,9 @@ Requirements: Rust (see `rust-toolchain.toml`), a WebGPU-capable GPU. For the br
 `wasm-pack`, Node, and Chrome.
 
 ```bash
+# Optional: fetch the large tokenizer fixture (the loader's tokenizer test skips without it)
+bash scripts/fetch-fixtures.sh
+
 # Unit tests (native GPU): kernels, primitives, loaders
 cargo test -p eyebrowse-core -p eyebrowse-gpu -p eyebrowse-kernels -p eyebrowse-nn
 
