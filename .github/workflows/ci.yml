@@ -14,7 +14,7 @@ jobs:
     name: fmt · clippy · build · test (lavapipe)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # rust-toolchain.toml pins the version + rustfmt/clippy components; rustup installs them.
       - name: Install pinned toolchain
