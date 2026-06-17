@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use eyebrowse_core::{EyebrowseError, Result};
-use safetensors::tensor::{Dtype, SafeTensors};
+use safetensors::tensor::{Dtype, Metadata, SafeTensors};
 use serde::Deserialize;
 
 use crate::config::{config_from_hf_json, Config};
@@ -56,11 +56,35 @@ struct IndexFile {
     weight_map: HashMap<String, String>,
 }
 
+/// One parsed `.safetensors` shard: the file bytes, the byte offset where the data section begins
+/// (`8 + header_len`), and the tensor metadata parsed once. `TensorInfo` offsets are relative to
+/// the data section, so the absolute byte range of a tensor is `data_start + offsets`.
+struct Shard {
+    bytes: Vec<u8>,
+    data_start: usize,
+    meta: Metadata,
+}
+
+impl Shard {
+    fn parse(name: &str, bytes: Vec<u8>) -> Result<Self> {
+        let (header_len, meta) = SafeTensors::read_metadata(&bytes)
+            .map_err(|e| EyebrowseError::Load(format!("parsing {name} header: {e}")))?;
+        Ok(Shard {
+            data_start: 8 + header_len,
+            bytes,
+            meta,
+        })
+    }
+}
+
 /// A [`WeightSource`] backed by one or more `.safetensors` files in a directory.
+///
+/// Each shard's header is parsed exactly once at load time; `raw` then slices the requested tensor
+/// directly out of the shard bytes (no per-lookup header re-parse).
 pub struct SafeTensorsSource {
     config: Config,
-    /// Shard file name -> full file contents.
-    shards: HashMap<String, Vec<u8>>,
+    /// Shard file name -> parsed shard.
+    shards: HashMap<String, Shard>,
     /// Tensor name -> shard file name holding it.
     locations: HashMap<String, String>,
 }
@@ -78,38 +102,35 @@ impl SafeTensorsSource {
         let index_path = dir.join("model.safetensors.index.json");
         let single_path = dir.join("model.safetensors");
 
-        let mut shards: HashMap<String, Vec<u8>> = HashMap::new();
-        let mut locations: HashMap<String, String> = HashMap::new();
-
-        if index_path.exists() {
+        // The set of shard files to load, regardless of single-file vs. sharded layout.
+        let shard_files: Vec<String> = if index_path.exists() {
             let index_json = std::fs::read_to_string(&index_path)
                 .map_err(|e| EyebrowseError::Load(format!("reading index.json: {e}")))?;
             let index: IndexFile = serde_json::from_str(&index_json)
                 .map_err(|e| EyebrowseError::Load(format!("parsing index.json: {e}")))?;
-
-            for (tensor, shard) in index.weight_map {
-                if !shards.contains_key(&shard) {
-                    let bytes = std::fs::read(dir.join(&shard))
-                        .map_err(|e| EyebrowseError::Load(format!("reading shard {shard}: {e}")))?;
-                    shards.insert(shard.clone(), bytes);
-                }
-                locations.insert(tensor, shard);
-            }
+            let mut files: Vec<String> = index.weight_map.into_values().collect();
+            files.sort();
+            files.dedup();
+            files
         } else if single_path.exists() {
-            let bytes = std::fs::read(&single_path)
-                .map_err(|e| EyebrowseError::Load(format!("reading model.safetensors: {e}")))?;
-            let shard = "model.safetensors".to_string();
-            let st = SafeTensors::deserialize(&bytes)
-                .map_err(|e| EyebrowseError::Load(format!("parsing model.safetensors: {e}")))?;
-            for name in st.names() {
-                locations.insert(name.to_string(), shard.clone());
-            }
-            shards.insert(shard, bytes);
+            vec!["model.safetensors".to_string()]
         } else {
             return Err(EyebrowseError::Load(format!(
                 "no model.safetensors or model.safetensors.index.json in {}",
                 dir.display()
             )));
+        };
+
+        let mut shards: HashMap<String, Shard> = HashMap::new();
+        let mut locations: HashMap<String, String> = HashMap::new();
+        for shard_name in shard_files {
+            let bytes = std::fs::read(dir.join(&shard_name))
+                .map_err(|e| EyebrowseError::Load(format!("reading shard {shard_name}: {e}")))?;
+            let shard = Shard::parse(&shard_name, bytes)?;
+            for name in shard.meta.tensors().into_keys() {
+                locations.insert(name, shard_name.clone());
+            }
+            shards.insert(shard_name, shard);
         }
 
         Ok(Self {
@@ -132,23 +153,28 @@ impl WeightSource for SafeTensorsSource {
     }
 
     fn raw(&self, name: &str) -> Result<RawTensor> {
-        let shard = self
+        let shard_name = self
             .locations
             .get(name)
             .ok_or_else(|| EyebrowseError::Load(format!("unknown tensor {name}")))?;
-        let bytes = self
+        let shard = self
             .shards
-            .get(shard)
-            .ok_or_else(|| EyebrowseError::Load(format!("missing shard {shard}")))?;
-        let st = SafeTensors::deserialize(bytes)
-            .map_err(|e| EyebrowseError::Load(format!("parsing {shard}: {e}")))?;
-        let view = st
-            .tensor(name)
-            .map_err(|e| EyebrowseError::Load(format!("tensor {name}: {e}")))?;
+            .get(shard_name)
+            .ok_or_else(|| EyebrowseError::Load(format!("missing shard {shard_name}")))?;
+        let info = shard.meta.info(name).ok_or_else(|| {
+            EyebrowseError::Load(format!("tensor {name} not present in shard {shard_name}"))
+        })?;
+        let start = shard.data_start + info.data_offsets.0;
+        let end = shard.data_start + info.data_offsets.1;
+        let bytes = shard
+            .bytes
+            .get(start..end)
+            .ok_or_else(|| EyebrowseError::Load(format!("tensor {name}: data offsets out of range")))?
+            .to_vec();
         Ok(RawTensor {
-            bytes: view.data().to_vec(),
-            dtype: map_dtype(view.dtype())?,
-            shape: view.shape().to_vec(),
+            bytes,
+            dtype: map_dtype(info.dtype)?,
+            shape: info.shape.clone(),
         })
     }
 }
