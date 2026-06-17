@@ -173,6 +173,7 @@ pub fn cpu_attn_prefill(
 
 /// CPU reference for a single decode step, **seq-major** KV cache. q `[h,hd]` attends
 /// keys/values `0..=pos` of a cache laid out `[max_seq, hkv, hd]`. Returns o `[h,hd]`.
+#[allow(clippy::too_many_arguments)]
 pub fn cpu_attn_decode(
     q: &[f32],
     kc: &[f32],

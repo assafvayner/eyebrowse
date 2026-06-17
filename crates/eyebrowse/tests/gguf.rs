@@ -5,7 +5,9 @@
 use std::path::Path;
 
 fn repo(rel: &str) -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(rel)
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(rel)
 }
 
 fn ids(v: &serde_json::Value, key: &str) -> Vec<u32> {
@@ -18,7 +20,8 @@ fn ids(v: &serde_json::Value, key: &str) -> Vec<u32> {
 }
 
 fn golden() -> serde_json::Value {
-    serde_json::from_str(&std::fs::read_to_string(repo("golden/qwen3-golden.json")).unwrap()).unwrap()
+    serde_json::from_str(&std::fs::read_to_string(repo("golden/qwen3-golden.json")).unwrap())
+        .unwrap()
 }
 
 #[test]
@@ -42,16 +45,46 @@ fn gguf_q8_0_matches_safetensors_golden() {
     let (a, b) = (src.config(), st.config());
     assert_eq!(a.arch, "qwen3");
     assert_eq!(
-        (a.hidden, a.n_layers, a.n_heads, a.n_kv_heads, a.head_dim, a.intermediate, a.vocab),
-        (b.hidden, b.n_layers, b.n_heads, b.n_kv_heads, b.head_dim, b.intermediate, b.vocab)
+        (
+            a.hidden,
+            a.n_layers,
+            a.n_heads,
+            a.n_kv_heads,
+            a.head_dim,
+            a.intermediate,
+            a.vocab
+        ),
+        (
+            b.hidden,
+            b.n_layers,
+            b.n_heads,
+            b.n_kv_heads,
+            b.head_dim,
+            b.intermediate,
+            b.vocab
+        )
     );
 
     let model = eyebrowse_models::load_model(&dev, &src, 256).unwrap();
-    let out = pollster::block_on(eyebrowse::greedy_generate(&model, &input_ids, cont.len(), 256)).unwrap();
+    let out = pollster::block_on(eyebrowse::greedy_generate(
+        &model,
+        &input_ids,
+        cont.len(),
+        256,
+    ))
+    .unwrap();
     assert_eq!(out[0], top1, "q8_0 first token");
     let matched = out.iter().zip(&cont).take_while(|(x, y)| x == y).count();
-    println!("q8_0 continuation match {}/{}: {out:?}", matched, cont.len());
-    assert!(matched >= cont.len() - 2, "q8_0 diverged: {matched}/{}", cont.len());
+    println!(
+        "q8_0 continuation match {}/{}: {out:?}",
+        matched,
+        cont.len()
+    );
+    assert!(
+        matched >= cont.len() - 2,
+        "q8_0 diverged: {matched}/{}",
+        cont.len()
+    );
 }
 
 #[test]
@@ -69,9 +102,19 @@ fn gguf_q4_k_m_smoke() {
     let dev = pollster::block_on(eyebrowse_gpu::Device::new()).unwrap();
     let src = eyebrowse_load::GgufSource::from_path(&gguf).unwrap();
     let model = eyebrowse_models::load_model(&dev, &src, 256).unwrap();
-    let out = pollster::block_on(eyebrowse::greedy_generate(&model, &input_ids, cont.len(), 256)).unwrap();
+    let out = pollster::block_on(eyebrowse::greedy_generate(
+        &model,
+        &input_ids,
+        cont.len(),
+        256,
+    ))
+    .unwrap();
     let matched = out.iter().zip(&cont).take_while(|(x, y)| x == y).count();
-    println!("q4_k_m continuation match {}/{}: {out:?}", matched, cont.len());
+    println!(
+        "q4_k_m continuation match {}/{}: {out:?}",
+        matched,
+        cont.len()
+    );
     // Q4_K_M is lossy; the high-margin first token ("Paris") should still survive quantization.
     assert_eq!(out[0], top1, "q4_k_m first token");
 }

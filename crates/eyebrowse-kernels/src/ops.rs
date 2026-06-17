@@ -195,6 +195,6 @@ mod tests {
                 assert_eq!(got[at], src[head * hd + d_]);
             }
         }
-        assert_eq!(got[(0 * hkv + 0) * hd + 0], 0.0);
+        assert_eq!(got[0], 0.0); // position 0 was never written
     }
 }

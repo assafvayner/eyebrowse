@@ -206,13 +206,26 @@ impl Decoder {
         let last = Tensor::empty(&self.dev, &[1, hidden], DType::F32);
         copy_range(&mut rec, &xn, &last, (n - 1) * hidden, 0, hidden);
         let logits = Tensor::empty(&self.dev, &[1, vocab], DType::F32);
-        linear_f16w(&mut rec, &last, self.lm_head_weight(), &logits, 1, hidden, vocab);
+        linear_f16w(
+            &mut rec,
+            &last,
+            self.lm_head_weight(),
+            &logits,
+            1,
+            hidden,
+            vocab,
+        );
         rec.submit();
         logits.to_f32().await
     }
 
     /// Decode one token `token` at absolute position `pos`, returning logits (`[vocab]`).
-    pub async fn forward_decode(&self, token: u32, pos: usize, kv: &mut KvCache) -> Result<Vec<f32>> {
+    pub async fn forward_decode(
+        &self,
+        token: u32,
+        pos: usize,
+        kv: &mut KvCache,
+    ) -> Result<Vec<f32>> {
         let (hidden, vocab) = (self.cfg.hidden, self.cfg.vocab);
         let mut rec = Recorder::new(&self.dev);
         let ids_t = Tensor::from_u32(&self.dev, &[1], &[token]);
@@ -221,7 +234,15 @@ impl Decoder {
         let xn = self.blocks(&mut rec, x, kv, 1, pos);
 
         let logits = Tensor::empty(&self.dev, &[1, vocab], DType::F32);
-        linear_f16w(&mut rec, &xn, self.lm_head_weight(), &logits, 1, hidden, vocab);
+        linear_f16w(
+            &mut rec,
+            &xn,
+            self.lm_head_weight(),
+            &logits,
+            1,
+            hidden,
+            vocab,
+        );
         rec.submit();
         logits.to_f32().await
     }

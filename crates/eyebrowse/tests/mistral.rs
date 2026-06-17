@@ -15,9 +15,10 @@ fn mistral_tiny_logits_match_hf() {
         eprintln!("SKIP: run golden/gen_mistral_golden.py to create models/mistral-tiny");
         return;
     }
-    let g: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(repo("golden/mistral-tiny-golden.json")).unwrap())
-            .unwrap();
+    let g: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(repo("golden/mistral-tiny-golden.json")).unwrap(),
+    )
+    .unwrap();
     let ids: Vec<u32> = g["input_ids"]
         .as_array()
         .unwrap()
@@ -34,7 +35,11 @@ fn mistral_tiny_logits_match_hf() {
     use eyebrowse_load::WeightSource;
     let dev = pollster::block_on(eyebrowse_gpu::Device::new()).unwrap();
     let src = eyebrowse_load::SafeTensorsSource::from_dir(&dir).unwrap();
-    assert_eq!(src.config().arch, "mistral", "fixture should be a mistral model");
+    assert_eq!(
+        src.config().arch,
+        "mistral",
+        "fixture should be a mistral model"
+    );
     let model = eyebrowse_models::load_model(&dev, &src, 64).unwrap();
     let mut kv = model.new_kv_cache(64);
     let got = pollster::block_on(model.forward_prefill(&ids, &mut kv)).unwrap();

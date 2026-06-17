@@ -301,11 +301,11 @@ fn build_config(
             .map(|v| v as usize)
     };
     let get_f32 = |suffix: &str| -> Option<f32> {
-        meta.get(&format!("{arch}.{suffix}")).and_then(|v| v.as_f32())
+        meta.get(&format!("{arch}.{suffix}"))
+            .and_then(|v| v.as_f32())
     };
 
-    let hidden =
-        get_u64("embedding_length").ok_or_else(|| missing(&arch, "embedding_length"))?;
+    let hidden = get_u64("embedding_length").ok_or_else(|| missing(&arch, "embedding_length"))?;
     let n_layers = get_u64("block_count").ok_or_else(|| missing(&arch, "block_count"))?;
     let n_heads =
         get_u64("attention.head_count").ok_or_else(|| missing(&arch, "attention.head_count"))?;
@@ -380,19 +380,15 @@ impl WeightSource for GgufSource {
         }
         let mut names: Vec<String> = candidates
             .into_iter()
-            .filter(|hf| {
-                hf_to_gguf(hf)
-                    .map(|g| self.has_tensor(&g))
-                    .unwrap_or(false)
-            })
+            .filter(|hf| hf_to_gguf(hf).map(|g| self.has_tensor(&g)).unwrap_or(false))
             .collect();
         names.sort();
         names
     }
 
     fn raw(&self, name: &str) -> Result<RawTensor> {
-        let gguf_name =
-            hf_to_gguf(name).ok_or_else(|| EyebrowseError::Load(format!("unknown tensor {name}")))?;
+        let gguf_name = hf_to_gguf(name)
+            .ok_or_else(|| EyebrowseError::Load(format!("unknown tensor {name}")))?;
         let info = self
             .tensors
             .get(&gguf_name)
