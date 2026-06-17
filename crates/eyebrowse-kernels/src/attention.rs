@@ -183,7 +183,18 @@ mod tests {
         let vt = Tensor::from_f32(&d, &[s, hkv, hd], &v);
         let ot = Tensor::empty(&d, &[s, h, hd], DType::F32);
         let mut rec = Recorder::new(&d);
-        attn_prefill(&mut rec, &qt, &kt, &vt, &ot, h, hkv, s, hd, 1.0 / (hd as f32).sqrt());
+        attn_prefill(
+            &mut rec,
+            &qt,
+            &kt,
+            &vt,
+            &ot,
+            h,
+            hkv,
+            s,
+            hd,
+            1.0 / (hd as f32).sqrt(),
+        );
         rec.submit();
         let got = pollster::block_on(ot.to_f32()).unwrap();
         let want = cpu_attn_prefill(&q, &k, &v, h, hkv, s, hd);
@@ -203,7 +214,17 @@ mod tests {
         let ot = Tensor::empty(&d, &[h, hd], DType::F32);
         let mut rec = Recorder::new(&d);
         attn_decode(
-            &mut rec, &qt, &kt, &vt, &ot, h, hkv, pos, hd, max_seq, 1.0 / (hd as f32).sqrt(),
+            &mut rec,
+            &qt,
+            &kt,
+            &vt,
+            &ot,
+            h,
+            hkv,
+            pos,
+            hd,
+            max_seq,
+            1.0 / (hd as f32).sqrt(),
         );
         rec.submit();
         let got = pollster::block_on(ot.to_f32()).unwrap();

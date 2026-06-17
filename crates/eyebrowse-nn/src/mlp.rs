@@ -112,12 +112,22 @@ mod tests {
         let d = pollster::block_on(Device::new()).expect("device");
         let (rows, hidden, inter) = (3usize, 8usize, 16usize);
         let x: Vec<f32> = (0..rows * hidden).map(|i| i as f32 * 0.03 - 0.4).collect();
-        let wg: Vec<f32> = (0..inter * hidden).map(|i| i as f32 * 0.005 - 0.3).collect();
-        let wu: Vec<f32> = (0..inter * hidden).map(|i| i as f32 * 0.004 - 0.2).collect();
-        let wd: Vec<f32> = (0..hidden * inter).map(|i| i as f32 * 0.003 - 0.25).collect();
+        let wg: Vec<f32> = (0..inter * hidden)
+            .map(|i| i as f32 * 0.005 - 0.3)
+            .collect();
+        let wu: Vec<f32> = (0..inter * hidden)
+            .map(|i| i as f32 * 0.004 - 0.2)
+            .collect();
+        let wd: Vec<f32> = (0..hidden * inter)
+            .map(|i| i as f32 * 0.003 - 0.25)
+            .collect();
 
         let mk = |w: &[f32], inf, outf| {
-            Linear::new(Tensor::from_u32(&d, &[pack_f16(w).len()], &pack_f16(w)), inf, outf)
+            Linear::new(
+                Tensor::from_u32(&d, &[pack_f16(w).len()], &pack_f16(w)),
+                inf,
+                outf,
+            )
         };
         let mlp = Mlp::geglu(
             mk(&wg, hidden, inter),
@@ -135,6 +145,10 @@ mod tests {
         let u = cpu_linear(&x, &round_f16(&wu), rows, hidden, inter);
         let h: Vec<f32> = g.iter().zip(u.iter()).map(|(a, b)| gelu(*a) * *b).collect();
         let want = cpu_linear(&h, &round_f16(&wd), rows, inter, hidden);
-        assert!(rel_l2(&got, &want) < 2e-3, "rel_l2 = {}", rel_l2(&got, &want));
+        assert!(
+            rel_l2(&got, &want) < 2e-3,
+            "rel_l2 = {}",
+            rel_l2(&got, &want)
+        );
     }
 }

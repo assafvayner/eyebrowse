@@ -6,6 +6,7 @@
 .venv/
 __pycache__/
 golden/mistral-tiny-golden.json
+golden/gemma4-tiny-golden.json
 # Qwen3-0.6B fixtures — fetched on demand via scripts/fetch-fixtures.sh, not tracked.
 crates/eyebrowse-load/tests/fixtures/qwen3-0.6b-tokenizer.json
 crates/eyebrowse-load/tests/fixtures/qwen3-0.6b-config.json
