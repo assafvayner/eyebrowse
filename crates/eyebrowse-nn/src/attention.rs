@@ -23,6 +23,27 @@ pub struct Attention {
 }
 
 impl Attention {
+    /// Run attention for `rows` rows whose first row is at absolute position `base_pos`, dispatching
+    /// to the batched prefill path for a fresh multi-row prompt and to the single-step decode path
+    /// otherwise (incl. a one-token prompt at position 0).
+    #[allow(clippy::too_many_arguments)]
+    pub fn forward(
+        &self,
+        rec: &mut Recorder,
+        x: &Tensor,
+        rope: &Rope,
+        kv: &mut KvCache,
+        layer: usize,
+        rows: usize,
+        base_pos: usize,
+    ) -> Tensor {
+        if base_pos == 0 && rows > 1 {
+            self.prefill(rec, x, rope, kv, layer, rows)
+        } else {
+            self.decode(rec, x, rope, kv, layer, base_pos)
+        }
+    }
+
     /// Prefill over a whole prompt. `x` is `[seq, hidden]`; returns `[seq, hidden]`.
     /// Writes the layer's keys/values into `kv` starting at sequence position 0.
     pub fn prefill(

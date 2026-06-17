@@ -169,7 +169,9 @@ impl WeightSource for SafeTensorsSource {
         let bytes = shard
             .bytes
             .get(start..end)
-            .ok_or_else(|| EyebrowseError::Load(format!("tensor {name}: data offsets out of range")))?
+            .ok_or_else(|| {
+                EyebrowseError::Load(format!("tensor {name}: data offsets out of range"))
+            })?
             .to_vec();
         Ok(RawTensor {
             bytes,

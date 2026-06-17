@@ -152,6 +152,10 @@ mod tests {
 
         // `from_f32` must allocate fresh (never pull): the pooled buffer stays put.
         let _t = Tensor::from_f32(&dev, &[4], &[1.0, 2.0, 3.0, 4.0]);
-        assert_eq!(dev.pooled(size, usage), 1, "from_f32 does not drain the pool");
+        assert_eq!(
+            dev.pooled(size, usage),
+            1,
+            "from_f32 does not drain the pool"
+        );
     }
 }
