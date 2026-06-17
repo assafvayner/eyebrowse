@@ -61,7 +61,11 @@ impl Attention {
             0,
         );
 
-        let o = Tensor::empty(rec.device(), &[seq, self.n_heads * self.head_dim], DType::F32);
+        let o = Tensor::empty(
+            rec.device(),
+            &[seq, self.n_heads * self.head_dim],
+            DType::F32,
+        );
         attn_prefill(
             rec,
             &qr,

@@ -71,7 +71,9 @@ mod tests {
     fn softmax_matches_cpu() {
         let d = test_device();
         let (rows, cols) = (4usize, 300usize); // cols > 256 to exercise the strided reduction
-        let x: Vec<f32> = (0..rows * cols).map(|i| ((i % 23) as f32) * 0.1 - 1.0).collect();
+        let x: Vec<f32> = (0..rows * cols)
+            .map(|i| ((i % 23) as f32) * 0.1 - 1.0)
+            .collect();
         let xt = Tensor::from_f32(&d, &[rows, cols], &x);
         let ot = Tensor::empty(&d, &[rows, cols], DType::F32);
         let mut rec = Recorder::new(&d);

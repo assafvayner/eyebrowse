@@ -73,24 +73,57 @@ impl Qwen3Model {
             let p = format!("model.layers.{i}");
             let ln1 = RmsNorm::new(f32t(&format!("{p}.input_layernorm.weight"))?, eps, hidden);
             let attn = Attention {
-                q_proj: Linear::new(f16(&format!("{p}.self_attn.q_proj.weight"))?, hidden, n_heads * head_dim),
-                k_proj: Linear::new(f16(&format!("{p}.self_attn.k_proj.weight"))?, hidden, n_kv * head_dim),
-                v_proj: Linear::new(f16(&format!("{p}.self_attn.v_proj.weight"))?, hidden, n_kv * head_dim),
-                o_proj: Linear::new(f16(&format!("{p}.self_attn.o_proj.weight"))?, n_heads * head_dim, hidden),
-                q_norm: RmsNorm::new(f32t(&format!("{p}.self_attn.q_norm.weight"))?, eps, head_dim),
-                k_norm: RmsNorm::new(f32t(&format!("{p}.self_attn.k_norm.weight"))?, eps, head_dim),
+                q_proj: Linear::new(
+                    f16(&format!("{p}.self_attn.q_proj.weight"))?,
+                    hidden,
+                    n_heads * head_dim,
+                ),
+                k_proj: Linear::new(
+                    f16(&format!("{p}.self_attn.k_proj.weight"))?,
+                    hidden,
+                    n_kv * head_dim,
+                ),
+                v_proj: Linear::new(
+                    f16(&format!("{p}.self_attn.v_proj.weight"))?,
+                    hidden,
+                    n_kv * head_dim,
+                ),
+                o_proj: Linear::new(
+                    f16(&format!("{p}.self_attn.o_proj.weight"))?,
+                    n_heads * head_dim,
+                    hidden,
+                ),
+                q_norm: RmsNorm::new(
+                    f32t(&format!("{p}.self_attn.q_norm.weight"))?,
+                    eps,
+                    head_dim,
+                ),
+                k_norm: RmsNorm::new(
+                    f32t(&format!("{p}.self_attn.k_norm.weight"))?,
+                    eps,
+                    head_dim,
+                ),
                 n_heads,
                 n_kv_heads: n_kv,
                 head_dim,
                 hidden,
             };
-            let ln2 = RmsNorm::new(f32t(&format!("{p}.post_attention_layernorm.weight"))?, eps, hidden);
+            let ln2 = RmsNorm::new(
+                f32t(&format!("{p}.post_attention_layernorm.weight"))?,
+                eps,
+                hidden,
+            );
             let mlp = Mlp::new(
                 Linear::new(f16(&format!("{p}.mlp.gate_proj.weight"))?, hidden, inter),
                 Linear::new(f16(&format!("{p}.mlp.up_proj.weight"))?, hidden, inter),
                 Linear::new(f16(&format!("{p}.mlp.down_proj.weight"))?, inter, hidden),
             );
-            layers.push(Layer { ln1, attn, ln2, mlp });
+            layers.push(Layer {
+                ln1,
+                attn,
+                ln2,
+                mlp,
+            });
         }
         let norm = RmsNorm::new(f32t("model.norm.weight")?, eps, hidden);
         let rope = Rope::build(dev, max_seq, head_dim, cfg.rope_theta);
@@ -154,13 +187,26 @@ impl Qwen3Model {
         let last = Tensor::empty(&self.dev, &[1, hidden], DType::F32);
         copy_range(&mut rec, &xn, &last, (n - 1) * hidden, 0, hidden);
         let logits = Tensor::empty(&self.dev, &[1, vocab], DType::F32);
-        linear_f16w(&mut rec, &last, self.lm_head_weight(), &logits, 1, hidden, vocab);
+        linear_f16w(
+            &mut rec,
+            &last,
+            self.lm_head_weight(),
+            &logits,
+            1,
+            hidden,
+            vocab,
+        );
         rec.submit();
         logits.to_f32().await
     }
 
     /// Decode one token `token` at absolute position `pos`, returning logits (`[vocab]`).
-    pub async fn forward_decode(&self, token: u32, pos: usize, kv: &mut KvCache) -> Result<Vec<f32>> {
+    pub async fn forward_decode(
+        &self,
+        token: u32,
+        pos: usize,
+        kv: &mut KvCache,
+    ) -> Result<Vec<f32>> {
         let (hidden, vocab) = (self.cfg.hidden, self.cfg.vocab);
         let mut rec = Recorder::new(&self.dev);
         let ids_t = Tensor::from_u32(&self.dev, &[1], &[token]);
@@ -169,7 +215,15 @@ impl Qwen3Model {
         let xn = self.blocks(&mut rec, x, kv, 1, pos);
 
         let logits = Tensor::empty(&self.dev, &[1, vocab], DType::F32);
-        linear_f16w(&mut rec, &xn, self.lm_head_weight(), &logits, 1, hidden, vocab);
+        linear_f16w(
+            &mut rec,
+            &xn,
+            self.lm_head_weight(),
+            &logits,
+            1,
+            hidden,
+            vocab,
+        );
         rec.submit();
         logits.to_f32().await
     }

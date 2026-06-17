@@ -152,7 +152,14 @@ pub fn uniform_u32(dev: &Arc<Device>, data: &[u32]) -> wgpu::Buffer {
 /// Copy `n` 4-byte elements from `src` (element offset `src_off`) into `dst` (element offset
 /// `dst_off`) via a buffer-to-buffer copy — no shader dispatch. Used e.g. to slice the last
 /// hidden row before the LM head.
-pub fn copy_range(rec: &mut Recorder, src: &Tensor, dst: &Tensor, src_off: usize, dst_off: usize, n: usize) {
+pub fn copy_range(
+    rec: &mut Recorder,
+    src: &Tensor,
+    dst: &Tensor,
+    src_off: usize,
+    dst_off: usize,
+    n: usize,
+) {
     rec.encoder.copy_buffer_to_buffer(
         &src.buffer,
         (src_off * 4) as u64,

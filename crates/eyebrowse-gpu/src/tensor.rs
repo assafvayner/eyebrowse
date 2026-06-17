@@ -67,7 +67,8 @@ impl Tensor {
     pub fn from_f32(dev: &Arc<Device>, shape: &[usize], data: &[f32]) -> Tensor {
         let t = Tensor::empty(dev, shape, DType::F32);
         assert_eq!(data.len(), t.numel(), "from_f32: data len != shape numel");
-        dev.queue.write_buffer(&t.buffer, 0, bytemuck::cast_slice(data));
+        dev.queue
+            .write_buffer(&t.buffer, 0, bytemuck::cast_slice(data));
         t
     }
 
@@ -75,7 +76,8 @@ impl Tensor {
     pub fn from_u32(dev: &Arc<Device>, shape: &[usize], data: &[u32]) -> Tensor {
         let t = Tensor::empty(dev, shape, DType::U32);
         assert_eq!(data.len(), t.numel(), "from_u32: data len != shape numel");
-        dev.queue.write_buffer(&t.buffer, 0, bytemuck::cast_slice(data));
+        dev.queue
+            .write_buffer(&t.buffer, 0, bytemuck::cast_slice(data));
         t
     }
 
@@ -108,7 +110,9 @@ impl Tensor {
         let mut enc = self
             .dev
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("readback") });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("readback"),
+            });
         enc.copy_buffer_to_buffer(&self.buffer, 0, &staging, 0, size);
         self.dev.queue.submit(Some(enc.finish()));
 

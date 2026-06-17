@@ -23,10 +23,10 @@ pub async fn greedy_generate(
     let logits = model.forward_prefill(input_ids, &mut kv).await?;
     let mut next = argmax(&logits);
     let mut out = vec![next];
-    let mut pos = input_ids.len();
-    for _ in 1..max_new {
+    for step in 1..max_new {
+        // The just-produced token sits at absolute position (prompt_len + step - 1).
+        let pos = input_ids.len() + step - 1;
         let logits = model.forward_decode(next, pos, &mut kv).await?;
-        pos += 1;
         next = argmax(&logits);
         out.push(next);
     }

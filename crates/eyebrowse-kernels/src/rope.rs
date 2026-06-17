@@ -57,7 +57,13 @@ pub fn rope(
         "rope",
         ROPE_WGSL,
         "main",
-        &[&x.buffer, &cos.buffer, &sin.buffer, &out.buffer, &dims.buffer],
+        &[
+            &x.buffer,
+            &cos.buffer,
+            &sin.buffer,
+            &out.buffer,
+            &dims.buffer,
+        ],
         [total.div_ceil(64), 1, 1],
     );
 }
@@ -89,7 +95,9 @@ mod tests {
         let (seq, n_heads, hd) = (4usize, 2usize, 8usize);
         let theta = 10000.0f32;
         let (cos, sin) = rope_tables(seq, hd, theta);
-        let x: Vec<f32> = (0..seq * n_heads * hd).map(|i| (i as f32) * 0.03 - 0.5).collect();
+        let x: Vec<f32> = (0..seq * n_heads * hd)
+            .map(|i| (i as f32) * 0.03 - 0.5)
+            .collect();
         let xt = Tensor::from_f32(&d, &[seq, n_heads, hd], &x);
         let ct = Tensor::from_f32(&d, &[seq, hd / 2], &cos);
         let st = Tensor::from_f32(&d, &[seq, hd / 2], &sin);

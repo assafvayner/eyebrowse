@@ -144,7 +144,15 @@ pub fn linear_f16w(
 }
 
 /// f32 GEMM: `c[m,n] = a[m,k] * b[k,n]` (all row-major). Records into `rec`.
-pub fn matmul(rec: &mut Recorder, a: &Tensor, b: &Tensor, c: &Tensor, m: usize, k: usize, n: usize) {
+pub fn matmul(
+    rec: &mut Recorder,
+    a: &Tensor,
+    b: &Tensor,
+    c: &Tensor,
+    m: usize,
+    k: usize,
+    n: usize,
+) {
     let dims = uniform_u32(rec.device(), &[m as u32, k as u32, n as u32, 0]);
     let gx = (n as u32).div_ceil(TILE);
     let gy = (m as u32).div_ceil(TILE);

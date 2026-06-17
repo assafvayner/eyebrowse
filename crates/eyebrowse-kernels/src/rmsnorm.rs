@@ -74,7 +74,9 @@ mod tests {
         let d = test_device();
         let (rows, dim) = (3usize, 320usize); // dim > 256 to exercise the strided reduction
         let eps = 1e-6f32;
-        let x: Vec<f32> = (0..rows * dim).map(|i| ((i % 17) as f32) * 0.05 - 0.4).collect();
+        let x: Vec<f32> = (0..rows * dim)
+            .map(|i| ((i % 17) as f32) * 0.05 - 0.4)
+            .collect();
         let w: Vec<f32> = (0..dim).map(|i| 1.0 + (i as f32) * 0.001).collect();
         let xt = Tensor::from_f32(&d, &[rows, dim], &x);
         let wt = Tensor::from_f32(&d, &[dim], &w);

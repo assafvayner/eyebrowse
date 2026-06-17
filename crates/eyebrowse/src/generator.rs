@@ -24,7 +24,11 @@ impl Generator {
         let dev = Device::new().await?;
         let model = Qwen3Model::load(&dev, &src, max_seq)?;
         let tok = load_tokenizer(&dir.join("tokenizer.json"))?;
-        Ok(Generator { model, tok, max_seq })
+        Ok(Generator {
+            model,
+            tok,
+            max_seq,
+        })
     }
 
     /// Greedy-generate `max_new` tokens after `input_ids`, returning the generated ids.
