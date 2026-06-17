@@ -13,7 +13,7 @@ mod softmax;
 mod testutil;
 
 pub use attention::{attn_decode, attn_prefill};
-pub use matmul::{matmul, matmul_f16w};
+pub use matmul::{linear_f16w, matmul, matmul_f16w};
 pub use ops::{embedding_f16, kv_write, swiglu};
 pub use rmsnorm::rmsnorm;
 pub use rope::rope;

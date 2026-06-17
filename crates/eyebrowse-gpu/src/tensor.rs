@@ -4,6 +4,24 @@ use eyebrowse_core::{DType, EyebrowseError, Result};
 
 use crate::Device;
 
+/// Pack f32 values into the kernels' f16 storage format: two f16 lanes per u32 word
+/// (`u32[w] = bits(f16(x[2w])) | (bits(f16(x[2w+1])) << 16)`). Odd tail is zero-padded.
+pub fn pack_f16(x: &[f32]) -> Vec<u32> {
+    let mut out = Vec::with_capacity(x.len().div_ceil(2));
+    let mut i = 0;
+    while i < x.len() {
+        let lo = half::f16::from_f32(x[i]).to_bits() as u32;
+        let hi = if i + 1 < x.len() {
+            half::f16::from_f32(x[i + 1]).to_bits() as u32
+        } else {
+            0
+        };
+        out.push(lo | (hi << 16));
+        i += 2;
+    }
+    out
+}
+
 /// A typed handle over a GPU storage buffer. Owns no host-side copy of the data.
 pub struct Tensor {
     pub(crate) dev: Arc<Device>,
@@ -59,6 +77,16 @@ impl Tensor {
         assert_eq!(data.len(), t.numel(), "from_u32: data len != shape numel");
         dev.queue.write_buffer(&t.buffer, 0, bytemuck::cast_slice(data));
         t
+    }
+
+    /// Upload f32 `data` as a packed-u32 f16 tensor (the kernels' weight storage format):
+    /// `u32[w] = bits(f16(data[2w])) | (bits(f16(data[2w+1])) << 16)`. Returns a `U32` tensor
+    /// of `ceil(len/2)` words; `logical_shape` records the logical dims for the caller.
+    pub fn from_f16_packed(dev: &Arc<Device>, logical_shape: &[usize], data: &[f32]) -> Tensor {
+        let n: usize = logical_shape.iter().product();
+        assert_eq!(data.len(), n, "from_f16_packed: data len != shape numel");
+        let packed = pack_f16(data);
+        Tensor::from_u32(dev, &[packed.len()], &packed)
     }
 
     /// Read the buffer back to the host as f32. Async: on native it drives the queue to
