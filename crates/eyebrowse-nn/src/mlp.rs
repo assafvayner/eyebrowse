@@ -55,53 +55,8 @@ impl Mlp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{cpu_linear, pack_f16, rel_l2, round_f16};
     use eyebrowse_gpu::Device;
-    use half::f16;
-
-    fn round_f16(x: &[f32]) -> Vec<f32> {
-        x.iter().map(|v| f16::from_f32(*v).to_f32()).collect()
-    }
-
-    fn pack_f16(x: &[f32]) -> Vec<u32> {
-        let mut out = Vec::with_capacity(x.len().div_ceil(2));
-        let mut i = 0;
-        while i < x.len() {
-            let lo = f16::from_f32(x[i]).to_bits() as u32;
-            let hi = if i + 1 < x.len() {
-                f16::from_f32(x[i + 1]).to_bits() as u32
-            } else {
-                0
-            };
-            out.push(lo | (hi << 16));
-            i += 2;
-        }
-        out
-    }
-
-    fn cpu_linear(x: &[f32], w: &[f32], m: usize, in_f: usize, out_f: usize) -> Vec<f32> {
-        let mut y = vec![0.0f32; m * out_f];
-        for i in 0..m {
-            for o in 0..out_f {
-                let mut acc = 0.0f32;
-                for k in 0..in_f {
-                    acc += x[i * in_f + k] * w[o * in_f + k];
-                }
-                y[i * out_f + o] = acc;
-            }
-        }
-        y
-    }
-
-    fn rel_l2(a: &[f32], b: &[f32]) -> f32 {
-        let mut num = 0.0f64;
-        let mut den = 0.0f64;
-        for (x, y) in a.iter().zip(b) {
-            let d = (*x as f64) - (*y as f64);
-            num += d * d;
-            den += (*y as f64) * (*y as f64);
-        }
-        (num.sqrt() / (den.sqrt() + 1e-12)) as f32
-    }
 
     fn gelu(g: f32) -> f32 {
         0.5 * g * (1.0 + (0.7978846 * (g + 0.044715 * g * g * g)).tanh())

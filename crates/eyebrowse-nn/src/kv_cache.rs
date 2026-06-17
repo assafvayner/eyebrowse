@@ -3,13 +3,14 @@ use std::sync::Arc;
 use eyebrowse_core::DType;
 use eyebrowse_gpu::{Device, Tensor};
 
-/// Per-layer key/value caches, each laid out seq-major `[max_seq, n_kv_heads, head_dim]`.
+/// Per-layer key/value caches, each laid out seq-major `[max_seq, n_kv_heads, head_dim]`. Per-layer
+/// `head_dim` can differ (Gemma's local vs. global layers), so it is not stored as a single scalar —
+/// consumers read each cache tensor's own shape.
 pub struct KvCache {
     pub k: Vec<Tensor>,
     pub v: Vec<Tensor>,
     pub max_seq: usize,
     pub n_kv_heads: usize,
-    pub head_dim: usize,
 }
 
 impl KvCache {
@@ -23,8 +24,8 @@ impl KvCache {
         KvCache::new_per_layer(dev, &vec![head_dim; n_layers], max_seq, n_kv_heads)
     }
 
-    /// Allocate per-layer caches where layer `l` uses `head_dims[l]`. The uniform `head_dim`
-    /// field holds `head_dims[0]` (or 0 when empty); per-layer consumers read tensor shapes.
+    /// Allocate per-layer caches where layer `l` uses `head_dims[l]` (lets Gemma's local and global
+    /// layers size their caches independently).
     pub fn new_per_layer(
         dev: &Arc<Device>,
         head_dims: &[usize],
@@ -44,7 +45,6 @@ impl KvCache {
             v,
             max_seq,
             n_kv_heads,
-            head_dim: head_dims.first().copied().unwrap_or(0),
         }
     }
 }
