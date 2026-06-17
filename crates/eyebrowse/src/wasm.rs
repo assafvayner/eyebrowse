@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
 
 use eyebrowse_gpu::Device;
 use eyebrowse_load::SafeTensorsSource;
-use eyebrowse_models::Qwen3Model;
+use eyebrowse_models::load_model;
 
 use crate::decode::greedy_generate;
 
@@ -27,7 +27,7 @@ pub async fn generate_ids(
     console_error_panic_hook::set_once();
     let src = SafeTensorsSource::from_bytes(&config_json, weights).map_err(err)?;
     let dev = Device::new().await.map_err(err)?;
-    let model = Qwen3Model::load(&dev, &src, max_seq).map_err(err)?;
+    let model = load_model(&dev, &src, max_seq).map_err(err)?;
     // Weights are now resident on the GPU; free the ~GB of safetensors bytes from the wasm heap.
     drop(src);
     greedy_generate(&model, &input_ids, max_new, max_seq)

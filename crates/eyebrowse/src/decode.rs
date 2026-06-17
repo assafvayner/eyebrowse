@@ -2,12 +2,12 @@
 //! Tokenizer-free (operates on token ids) so it compiles on both targets.
 
 use eyebrowse_core::Result;
-use eyebrowse_models::Qwen3Model;
+use eyebrowse_models::Decoder;
 
 /// Greedy-generate `max_new` tokens after `input_ids`, returning the generated ids. Allocates a
 /// fresh KV cache sized to `max_seq` (must be >= `input_ids.len() + max_new`).
 pub async fn greedy_generate(
-    model: &Qwen3Model,
+    model: &Decoder,
     input_ids: &[u32],
     max_new: usize,
     max_seq: usize,
