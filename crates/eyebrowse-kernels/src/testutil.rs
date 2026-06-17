@@ -124,8 +124,9 @@ pub fn cpu_rope(
     out
 }
 
-/// CPU reference for causal multi-head attention with GQA. q `[h,s,hd]`, k/v `[hkv,s,hd]`,
-/// returns o `[h,s,hd]`. Query head `hh` uses kv head `hh / (h/hkv)`. scale = 1/sqrt(hd).
+/// CPU reference for causal multi-head attention with GQA, **seq-major** layout.
+/// q `[s,h,hd]`, k/v `[s,hkv,hd]`, returns o `[s,h,hd]`. Query head `hh` uses kv head
+/// `hh / (h/hkv)`. scale = 1/sqrt(hd).
 pub fn cpu_attn_prefill(
     q: &[f32],
     k: &[f32],
@@ -137,15 +138,15 @@ pub fn cpu_attn_prefill(
 ) -> Vec<f32> {
     let group = h / hkv;
     let scale = 1.0 / (hd as f32).sqrt();
-    let mut o = vec![0.0f32; h * s * hd];
-    for hh in 0..h {
-        let kvh = hh / group;
-        for i in 0..s {
-            let qbase = (hh * s + i) * hd;
+    let mut o = vec![0.0f32; s * h * hd];
+    for i in 0..s {
+        for hh in 0..h {
+            let kvh = hh / group;
+            let qbase = (i * h + hh) * hd;
             let mut scores = Vec::with_capacity(i + 1);
             let mut mx = f32::NEG_INFINITY;
             for j in 0..=i {
-                let kbase = (kvh * s + j) * hd;
+                let kbase = (j * hkv + kvh) * hd;
                 let mut dot = 0.0f32;
                 for d in 0..hd {
                     dot += q[qbase + d] * k[kbase + d];
@@ -160,7 +161,7 @@ pub fn cpu_attn_prefill(
             }
             for (j, sc) in scores.iter().enumerate() {
                 let w = (sc - mx).exp() / sum;
-                let vbase = (kvh * s + j) * hd;
+                let vbase = (j * hkv + kvh) * hd;
                 for d in 0..hd {
                     o[qbase + d] += w * v[vbase + d];
                 }
@@ -170,8 +171,8 @@ pub fn cpu_attn_prefill(
     o
 }
 
-/// CPU reference for a single decode step: q `[h,hd]` attends keys/values `0..=pos` of a KV
-/// cache laid out `[hkv, max_seq, hd]`. Returns o `[h,hd]`.
+/// CPU reference for a single decode step, **seq-major** KV cache. q `[h,hd]` attends
+/// keys/values `0..=pos` of a cache laid out `[max_seq, hkv, hd]`. Returns o `[h,hd]`.
 pub fn cpu_attn_decode(
     q: &[f32],
     kc: &[f32],
@@ -180,7 +181,7 @@ pub fn cpu_attn_decode(
     hkv: usize,
     pos: usize,
     hd: usize,
-    max_seq: usize,
+    _max_seq: usize,
 ) -> Vec<f32> {
     let group = h / hkv;
     let scale = 1.0 / (hd as f32).sqrt();
@@ -191,7 +192,7 @@ pub fn cpu_attn_decode(
         let mut scores = Vec::with_capacity(pos + 1);
         let mut mx = f32::NEG_INFINITY;
         for j in 0..=pos {
-            let kbase = (kvh * max_seq + j) * hd;
+            let kbase = (j * hkv + kvh) * hd;
             let mut dot = 0.0f32;
             for d in 0..hd {
                 dot += q[qbase + d] * kc[kbase + d];
@@ -206,7 +207,7 @@ pub fn cpu_attn_decode(
         }
         for (j, sc) in scores.iter().enumerate() {
             let w = (sc - mx).exp() / sum;
-            let vbase = (kvh * max_seq + j) * hd;
+            let vbase = (j * hkv + kvh) * hd;
             for d in 0..hd {
                 o[qbase + d] += w * vc[vbase + d];
             }
