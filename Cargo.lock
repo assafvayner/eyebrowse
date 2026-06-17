@@ -296,6 +296,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d817e038c30374a4bcb22f94d0a8a0e216958d4c3dcde369b1439fec4bdda6e6"
 
 [[package]]
+name = "eyebrowse"
+version = "0.1.0"
+dependencies = [
+ "eyebrowse-core",
+ "eyebrowse-gpu",
+ "eyebrowse-kernels",
+ "eyebrowse-load",
+ "eyebrowse-models",
+ "eyebrowse-nn",
+ "pollster",
+ "serde_json",
+ "tokenizers",
+]
+
+[[package]]
 name = "eyebrowse-core"
 version = "0.1.0"
 dependencies = [
@@ -342,6 +357,20 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokenizers",
+]
+
+[[package]]
+name = "eyebrowse-models"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "eyebrowse-core",
+ "eyebrowse-gpu",
+ "eyebrowse-kernels",
+ "eyebrowse-load",
+ "eyebrowse-nn",
+ "half",
+ "pollster",
 ]
 
 [[package]]
