@@ -38,8 +38,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 "#;
 
 const KV_WRITE_WGSL: &str = r#"
-@group(0) @binding(0) var<storage, read_write> cache: array<f32>;  // [Hkv, max_seq, hd]
-@group(0) @binding(1) var<storage, read_write> src: array<f32>;    // [Hkv, count, hd]
+@group(0) @binding(0) var<storage, read_write> cache: array<f32>;  // [max_seq, Hkv, hd]
+@group(0) @binding(1) var<storage, read_write> src: array<f32>;    // [count, Hkv, hd]
 @group(0) @binding(2) var<storage, read_write> params: array<u32>; // [hkv, count, hd, max_seq, dst_start]
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -49,9 +49,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (idx >= hkv * count * hd) { return; }
     let d = idx % hd;
     let tmp = idx / hd;
-    let c = tmp % count;
-    let head = tmp / count;
-    let cache_idx = (head * max_seq + (dst + c)) * hd + d;
+    let head = tmp % hkv;
+    let c = tmp / hkv;
+    let cache_idx = ((dst + c) * hkv + head) * hd + d;
     cache[cache_idx] = src[idx];
 }
 "#;
@@ -179,22 +179,22 @@ mod tests {
     fn kv_write_places_rows() {
         let d = test_device();
         let (hkv, hd, max_seq) = (2usize, 4usize, 8usize);
-        let cache = vec![0.0f32; hkv * max_seq * hd];
-        let ct = Tensor::from_f32(&d, &[hkv, max_seq, hd], &cache);
-        // write 1 position at dst=3
-        let src: Vec<f32> = (0..hkv * 1 * hd).map(|i| i as f32 + 1.0).collect();
-        let st = Tensor::from_f32(&d, &[hkv, 1, hd], &src);
+        let cache = vec![0.0f32; max_seq * hkv * hd];
+        let ct = Tensor::from_f32(&d, &[max_seq, hkv, hd], &cache);
+        // write 1 position (seq-major src [1, hkv, hd]) at dst=3
+        let src: Vec<f32> = (0..hkv * hd).map(|i| i as f32 + 1.0).collect();
+        let st = Tensor::from_f32(&d, &[1, hkv, hd], &src);
         let mut rec = Recorder::new(&d);
         kv_write(&mut rec, &ct, &st, hkv, 1, hd, max_seq, 3);
         rec.submit();
         let got = pollster::block_on(ct.to_f32()).unwrap();
-        // head 0 row 3 and head 1 row 3 should equal src; rest zero.
+        // cache position 3 (for both heads) should equal src; position 0 stays zero.
         for head in 0..hkv {
             for d_ in 0..hd {
-                let at = (head * max_seq + 3) * hd + d_;
+                let at = (3 * hkv + head) * hd + d_;
                 assert_eq!(got[at], src[head * hd + d_]);
             }
         }
-        assert_eq!(got[(0 * max_seq + 0) * hd + 0], 0.0);
+        assert_eq!(got[(0 * hkv + 0) * hd + 0], 0.0);
     }
 }

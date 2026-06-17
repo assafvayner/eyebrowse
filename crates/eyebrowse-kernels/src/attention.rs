@@ -8,10 +8,10 @@
 use eyebrowse_gpu::{dispatch, Recorder, Tensor};
 
 const PREFILL_TMPL: &str = r#"
-@group(0) @binding(0) var<storage, read_write> q: array<f32>;    // [H, S, HD]
-@group(0) @binding(1) var<storage, read_write> k: array<f32>;    // [Hkv, S, HD]
-@group(0) @binding(2) var<storage, read_write> v: array<f32>;    // [Hkv, S, HD]
-@group(0) @binding(3) var<storage, read_write> o: array<f32>;    // [H, S, HD]
+@group(0) @binding(0) var<storage, read_write> q: array<f32>;    // [S, H, HD]
+@group(0) @binding(1) var<storage, read_write> k: array<f32>;    // [S, Hkv, HD]
+@group(0) @binding(2) var<storage, read_write> v: array<f32>;    // [S, Hkv, HD]
+@group(0) @binding(3) var<storage, read_write> o: array<f32>;    // [S, H, HD]
 @group(0) @binding(4) var<storage, read_write> dims: array<u32>; // [H, Hkv, S]
 
 const HD: u32 = __HD__u;
@@ -21,11 +21,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let H = dims[0]; let Hkv = dims[1]; let S = dims[2];
     let idx = gid.x;
     if (idx >= H * S) { return; }
-    let h = idx / S;
-    let i = idx % S;
+    let i = idx / H;
+    let h = idx % H;
     let group = H / Hkv;
     let kvh = h / group;
-    let qbase = (h * S + i) * HD;
+    let qbase = (i * H + h) * HD;
     let scale = 1.0 / sqrt(f32(HD));
 
     var acc: array<f32, __HD__>;
@@ -33,7 +33,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var m = -3.0e38;
     var l = 0.0;
     for (var j = 0u; j <= i; j = j + 1u) {
-        let kbase = (kvh * S + j) * HD;
+        let kbase = (j * Hkv + kvh) * HD;
         var s = 0.0;
         for (var d = 0u; d < HD; d = d + 1u) { s = s + q[qbase + d] * k[kbase + d]; }
         s = s * scale;
@@ -51,8 +51,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 const DECODE_TMPL: &str = r#"
 @group(0) @binding(0) var<storage, read_write> q: array<f32>;    // [H, HD] (current token)
-@group(0) @binding(1) var<storage, read_write> kc: array<f32>;   // [Hkv, MAXSEQ, HD]
-@group(0) @binding(2) var<storage, read_write> vc: array<f32>;   // [Hkv, MAXSEQ, HD]
+@group(0) @binding(1) var<storage, read_write> kc: array<f32>;   // [MAXSEQ, Hkv, HD]
+@group(0) @binding(2) var<storage, read_write> vc: array<f32>;   // [MAXSEQ, Hkv, HD]
 @group(0) @binding(3) var<storage, read_write> o: array<f32>;    // [H, HD]
 @group(0) @binding(4) var<storage, read_write> dims: array<u32>; // [H, Hkv, pos, MAXSEQ]
 
@@ -73,7 +73,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var m = -3.0e38;
     var l = 0.0;
     for (var j = 0u; j <= pos; j = j + 1u) {
-        let kbase = (kvh * max_seq + j) * HD;
+        let kbase = (j * Hkv + kvh) * HD;
         var s = 0.0;
         for (var d = 0u; d < HD; d = d + 1u) { s = s + q[qbase + d] * kc[kbase + d]; }
         s = s * scale;
@@ -159,10 +159,10 @@ mod tests {
         let q = ramp(h * s * hd, -0.5, 0.011);
         let k = ramp(hkv * s * hd, -0.3, 0.007);
         let v = ramp(hkv * s * hd, 0.2, 0.013);
-        let qt = Tensor::from_f32(&d, &[h, s, hd], &q);
-        let kt = Tensor::from_f32(&d, &[hkv, s, hd], &k);
-        let vt = Tensor::from_f32(&d, &[hkv, s, hd], &v);
-        let ot = Tensor::empty(&d, &[h, s, hd], DType::F32);
+        let qt = Tensor::from_f32(&d, &[s, h, hd], &q);
+        let kt = Tensor::from_f32(&d, &[s, hkv, hd], &k);
+        let vt = Tensor::from_f32(&d, &[s, hkv, hd], &v);
+        let ot = Tensor::empty(&d, &[s, h, hd], DType::F32);
         let mut rec = Recorder::new(&d);
         attn_prefill(&mut rec, &qt, &kt, &vt, &ot, h, hkv, s, hd);
         rec.submit();
@@ -179,8 +179,8 @@ mod tests {
         let kc = ramp(hkv * max_seq * hd, -0.2, 0.005);
         let vc = ramp(hkv * max_seq * hd, 0.1, 0.009);
         let qt = Tensor::from_f32(&d, &[h, hd], &q);
-        let kt = Tensor::from_f32(&d, &[hkv, max_seq, hd], &kc);
-        let vt = Tensor::from_f32(&d, &[hkv, max_seq, hd], &vc);
+        let kt = Tensor::from_f32(&d, &[max_seq, hkv, hd], &kc);
+        let vt = Tensor::from_f32(&d, &[max_seq, hkv, hd], &vc);
         let ot = Tensor::empty(&d, &[h, hd], DType::F32);
         let mut rec = Recorder::new(&d);
         attn_decode(&mut rec, &qt, &kt, &vt, &ot, h, hkv, pos, hd, max_seq);

@@ -8,11 +8,11 @@ const ROPE_WGSL: &str = r#"
 @group(0) @binding(1) var<storage, read_write> cosb: array<f32>;  // [seq, hd/2]
 @group(0) @binding(2) var<storage, read_write> sinb: array<f32>;  // [seq, hd/2]
 @group(0) @binding(3) var<storage, read_write> out: array<f32>;
-@group(0) @binding(4) var<storage, read_write> dims: array<u32>;  // [seq, n_heads, hd]
+@group(0) @binding(4) var<storage, read_write> dims: array<u32>;  // [seq, n_heads, hd, base_pos]
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let seq = dims[0]; let n_heads = dims[1]; let hd = dims[2];
+    let seq = dims[0]; let n_heads = dims[1]; let hd = dims[2]; let base_pos = dims[3];
     let half = hd / 2u;
     let total = seq * n_heads * half;
     let idx = gid.x;
@@ -22,8 +22,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let head = tmp % n_heads;
     let s = tmp / n_heads;
     let base = (s * n_heads + head) * hd;
-    let c = cosb[s * half + p];
-    let sn = sinb[s * half + p];
+    let c = cosb[(s + base_pos) * half + p];
+    let sn = sinb[(s + base_pos) * half + p];
     let x1 = x[base + p];
     let x2 = x[base + half + p];
     out[base + p] = x1 * c - x2 * sn;
@@ -31,7 +31,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
-/// Apply RoPE to `x` (`[seq, n_heads, head_dim]`) using `cos`/`sin` (`[seq, head_dim/2]`), into `out`.
+/// Apply RoPE to `x` (`[seq, n_heads, head_dim]`) using `cos`/`sin` (`[max_seq, head_dim/2]`),
+/// into `out`. `base_pos` is the absolute position of the first row (0 for prefill; the current
+/// position for a single decode step).
+#[allow(clippy::too_many_arguments)]
 pub fn rope(
     rec: &mut Recorder,
     x: &Tensor,
@@ -41,11 +44,12 @@ pub fn rope(
     seq: usize,
     n_heads: usize,
     head_dim: usize,
+    base_pos: usize,
 ) {
     let dims = Tensor::from_u32(
         rec.device(),
-        &[3],
-        &[seq as u32, n_heads as u32, head_dim as u32],
+        &[4],
+        &[seq as u32, n_heads as u32, head_dim as u32, base_pos as u32],
     );
     let total = (seq * n_heads * (head_dim / 2)) as u32;
     dispatch(
@@ -91,7 +95,7 @@ mod tests {
         let st = Tensor::from_f32(&d, &[seq, hd / 2], &sin);
         let ot = Tensor::empty(&d, &[seq, n_heads, hd], DType::F32);
         let mut rec = Recorder::new(&d);
-        rope(&mut rec, &xt, &ct, &st, &ot, seq, n_heads, hd);
+        rope(&mut rec, &xt, &ct, &st, &ot, seq, n_heads, hd, 0);
         rec.submit();
         let got = pollster::block_on(ot.to_f32()).unwrap();
         let want = cpu_rope(&x, &cos, &sin, seq, n_heads, hd);
