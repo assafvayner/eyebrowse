@@ -16,13 +16,25 @@ pub struct Rope {
 
 impl Rope {
     pub fn build(dev: &Arc<Device>, max_seq: usize, head_dim: usize, theta: f32) -> Rope {
+        Rope::build_partial(dev, max_seq, head_dim, head_dim / 2, theta)
+    }
+
+    /// Like `build`, but only the first `rope_angles` frequencies are nonzero; the remaining
+    /// pairs get cos=1, sin=0 (pass-through). Realizes Gemma 4's partial-rotary global RoPE.
+    pub fn build_partial(
+        dev: &Arc<Device>,
+        max_seq: usize,
+        head_dim: usize,
+        rope_angles: usize,
+        theta: f32,
+    ) -> Rope {
         let half = head_dim / 2;
-        let mut cos = vec![0.0f32; max_seq * half];
+        let mut cos = vec![1.0f32; max_seq * half];
         let mut sin = vec![0.0f32; max_seq * half];
         let theta = theta as f64;
         let hd = head_dim as f64;
         for s in 0..max_seq {
-            for k in 0..half {
+            for k in 0..rope_angles.min(half) {
                 let inv_freq = theta.powf(-(2.0 * k as f64) / hd);
                 let angle = s as f64 * inv_freq;
                 cos[s * half + k] = angle.cos() as f32;
@@ -60,5 +72,33 @@ impl Rope {
             base_pos,
         );
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_partial_zeros_high_frequencies() {
+        let dev = pollster::block_on(Device::new()).expect("device");
+        let (max_seq, head_dim) = (5usize, 8usize);
+        let half = head_dim / 2;
+        let full = Rope::build(&dev, max_seq, head_dim, 10000.0);
+        let partial = Rope::build_partial(&dev, max_seq, head_dim, 2, 10000.0);
+        let full_cos = pollster::block_on(full.cos.to_f32()).unwrap();
+        let full_sin = pollster::block_on(full.sin.to_f32()).unwrap();
+        let part_cos = pollster::block_on(partial.cos.to_f32()).unwrap();
+        let part_sin = pollster::block_on(partial.sin.to_f32()).unwrap();
+        for s in 0..max_seq {
+            for k in 0..2 {
+                assert_eq!(part_cos[s * half + k], full_cos[s * half + k]);
+                assert_eq!(part_sin[s * half + k], full_sin[s * half + k]);
+            }
+            for k in 2..half {
+                assert_eq!(part_cos[s * half + k], 1.0);
+                assert_eq!(part_sin[s * half + k], 0.0);
+            }
+        }
     }
 }
