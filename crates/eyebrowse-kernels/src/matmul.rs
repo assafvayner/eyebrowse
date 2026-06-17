@@ -4,7 +4,7 @@
 //! Matrix dims are passed via a small storage buffer (`dims`) rather than push constants,
 //! since WebGPU has no push constants; this keeps the dispatch helper uniform.
 
-use eyebrowse_gpu::{dispatch, Recorder, Tensor};
+use eyebrowse_gpu::{dispatch_with_uniform, uniform_u32, Recorder, Tensor};
 
 const TILE: u32 = 16;
 
@@ -12,7 +12,7 @@ const MATMUL_WGSL: &str = r#"
 @group(0) @binding(0) var<storage, read_write> a: array<f32>;     // [M,K]
 @group(0) @binding(1) var<storage, read_write> b: array<f32>;     // [K,N]
 @group(0) @binding(2) var<storage, read_write> c: array<f32>;     // [M,N]
-@group(0) @binding(3) var<storage, read_write> dims: array<u32>;  // [M,K,N]
+@group(0) @binding(3) var<uniform> dims: vec4<u32>;               // [M,K,N,_]
 
 var<workgroup> As: array<f32, 256>;
 var<workgroup> Bs: array<f32, 256>;
@@ -20,7 +20,7 @@ var<workgroup> Bs: array<f32, 256>;
 @compute @workgroup_size(16, 16)
 fn main(@builtin(local_invocation_id) lid: vec3<u32>,
         @builtin(workgroup_id) wid: vec3<u32>) {
-    let M = dims[0]; let K = dims[1]; let N = dims[2];
+    let M = dims.x; let K = dims.y; let N = dims.z;
     let row = wid.y * 16u + lid.y;
     let col = wid.x * 16u + lid.x;
     var acc = 0.0;
@@ -44,7 +44,7 @@ const MATMUL_F16W_WGSL: &str = r#"
 @group(0) @binding(0) var<storage, read_write> a: array<f32>;     // [M,K] activations
 @group(0) @binding(1) var<storage, read_write> b: array<u32>;     // [K,N] f16 packed 2/word, row-major flatten
 @group(0) @binding(2) var<storage, read_write> c: array<f32>;     // [M,N]
-@group(0) @binding(3) var<storage, read_write> dims: array<u32>;  // [M,K,N]
+@group(0) @binding(3) var<uniform> dims: vec4<u32>;               // [M,K,N,_]
 
 // Read logical f16 weight element at flat index `idx` (row-major over [K,N]) from the packed u32 buffer.
 fn wld(idx: u32) -> f32 {
@@ -59,7 +59,7 @@ var<workgroup> Bs: array<f32, 256>;
 @compute @workgroup_size(16, 16)
 fn main(@builtin(local_invocation_id) lid: vec3<u32>,
         @builtin(workgroup_id) wid: vec3<u32>) {
-    let M = dims[0]; let K = dims[1]; let N = dims[2];
+    let M = dims.x; let K = dims.y; let N = dims.z;
     let row = wid.y * 16u + lid.y;
     let col = wid.x * 16u + lid.x;
     var acc = 0.0;
@@ -85,7 +85,7 @@ const LINEAR_F16W_WGSL: &str = r#"
 @group(0) @binding(0) var<storage, read_write> a: array<f32>;     // [M,K] activations
 @group(0) @binding(1) var<storage, read_write> b: array<u32>;     // [N,K] f16 packed 2/word
 @group(0) @binding(2) var<storage, read_write> c: array<f32>;     // [M,N]
-@group(0) @binding(3) var<storage, read_write> dims: array<u32>;  // [M,K,N]
+@group(0) @binding(3) var<uniform> dims: vec4<u32>;               // [M,K,N,_]
 
 fn wld(idx: u32) -> f32 {
     let pair = unpack2x16float(b[idx >> 1u]);
@@ -98,7 +98,7 @@ var<workgroup> Bs: array<f32, 256>;
 @compute @workgroup_size(16, 16)
 fn main(@builtin(local_invocation_id) lid: vec3<u32>,
         @builtin(workgroup_id) wid: vec3<u32>) {
-    let M = dims[0]; let K = dims[1]; let N = dims[2];
+    let M = dims.x; let K = dims.y; let N = dims.z;
     let row = wid.y * 16u + lid.y;
     let col = wid.x * 16u + lid.x;
     var acc = 0.0;
@@ -129,30 +129,32 @@ pub fn linear_f16w(
     in_f: usize,
     out_f: usize,
 ) {
-    let dims = Tensor::from_u32(rec.device(), &[3], &[m as u32, in_f as u32, out_f as u32]);
+    let dims = uniform_u32(rec.device(), &[m as u32, in_f as u32, out_f as u32, 0]);
     let gx = (out_f as u32).div_ceil(TILE);
     let gy = (m as u32).div_ceil(TILE);
-    dispatch(
+    dispatch_with_uniform(
         rec,
         "linear_f16w",
         LINEAR_F16W_WGSL,
         "main",
-        &[&a.buffer, &w.buffer, &c.buffer, &dims.buffer],
+        &[&a.buffer, &w.buffer, &c.buffer],
+        &[&dims],
         [gx, gy, 1],
     );
 }
 
 /// f32 GEMM: `c[m,n] = a[m,k] * b[k,n]` (all row-major). Records into `rec`.
 pub fn matmul(rec: &mut Recorder, a: &Tensor, b: &Tensor, c: &Tensor, m: usize, k: usize, n: usize) {
-    let dims = Tensor::from_u32(rec.device(), &[3], &[m as u32, k as u32, n as u32]);
+    let dims = uniform_u32(rec.device(), &[m as u32, k as u32, n as u32, 0]);
     let gx = (n as u32).div_ceil(TILE);
     let gy = (m as u32).div_ceil(TILE);
-    dispatch(
+    dispatch_with_uniform(
         rec,
         "matmul_f32",
         MATMUL_WGSL,
         "main",
-        &[&a.buffer, &b.buffer, &c.buffer, &dims.buffer],
+        &[&a.buffer, &b.buffer, &c.buffer],
+        &[&dims],
         [gx, gy, 1],
     );
 }
@@ -168,15 +170,16 @@ pub fn matmul_f16w(
     k: usize,
     n: usize,
 ) {
-    let dims = Tensor::from_u32(rec.device(), &[3], &[m as u32, k as u32, n as u32]);
+    let dims = uniform_u32(rec.device(), &[m as u32, k as u32, n as u32, 0]);
     let gx = (n as u32).div_ceil(TILE);
     let gy = (m as u32).div_ceil(TILE);
-    dispatch(
+    dispatch_with_uniform(
         rec,
         "matmul_f16w",
         MATMUL_F16W_WGSL,
         "main",
-        &[&a.buffer, &b.buffer, &c.buffer, &dims.buffer],
+        &[&a.buffer, &b.buffer, &c.buffer],
+        &[&dims],
         [gx, gy, 1],
     );
 }

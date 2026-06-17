@@ -3,16 +3,21 @@ use std::sync::Arc;
 use crate::device::CachedPipeline;
 use crate::{Device, Recorder, Tensor};
 
-/// Get-or-compile a compute pipeline whose single bind group is `n_buffers` storage
-/// buffers at bindings `0..n_buffers`, all declared `var<storage, read_write>` in WGSL.
+/// Get-or-compile a compute pipeline whose single bind group is `n_storage` storage buffers
+/// (`var<storage, read_write>`) at bindings `0..n_storage`, followed by `n_uniform` uniform
+/// buffers (`var<uniform>`) at bindings `n_storage..n_storage+n_uniform`.
 ///
-/// Keyed by `key` (must be stable per (wgsl, entry, n_buffers)); cached on the device.
+/// Uniform bindings exist so a kernel can read scalars (e.g. matrix dims) as *uniform* values:
+/// WGSL forbids `workgroupBarrier()` in control flow that depends on a non-uniform value, and
+/// reads from a `read_write` storage buffer are non-uniform. Tiled GEMM (barrier inside a loop
+/// bounded by K) must therefore take its dims via a uniform buffer. Cached by `key`.
 fn get_pipeline(
     dev: &Arc<Device>,
     key: &str,
     wgsl: &str,
     entry: &str,
-    n_buffers: usize,
+    n_storage: usize,
+    n_uniform: usize,
 ) -> Arc<CachedPipeline> {
     if let Some(p) = dev.pipelines.lock().unwrap().get(key) {
         return p.clone();
@@ -23,7 +28,7 @@ fn get_pipeline(
             label: Some(key),
             source: wgpu::ShaderSource::Wgsl(wgsl.into()),
         });
-    let entries: Vec<wgpu::BindGroupLayoutEntry> = (0..n_buffers)
+    let mut entries: Vec<wgpu::BindGroupLayoutEntry> = (0..n_storage)
         .map(|i| wgpu::BindGroupLayoutEntry {
             binding: i as u32,
             visibility: wgpu::ShaderStages::COMPUTE,
@@ -35,6 +40,18 @@ fn get_pipeline(
             count: None,
         })
         .collect();
+    for u in 0..n_uniform {
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: (n_storage + u) as u32,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        });
+    }
     let layout = dev
         .device
         .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -76,10 +93,26 @@ pub fn dispatch(
     buffers: &[&wgpu::Buffer],
     workgroups: [u32; 3],
 ) {
+    dispatch_with_uniform(rec, key, wgsl, entry, buffers, &[], workgroups);
+}
+
+/// Like [`dispatch`], but the buffers in `uniform` are bound as `var<uniform>` at the bindings
+/// immediately after the `storage` buffers. Use for kernels that must read scalars (dims) as
+/// uniform values to keep `workgroupBarrier()` in uniform control flow.
+pub fn dispatch_with_uniform(
+    rec: &mut Recorder,
+    key: &str,
+    wgsl: &str,
+    entry: &str,
+    storage: &[&wgpu::Buffer],
+    uniform: &[&wgpu::Buffer],
+    workgroups: [u32; 3],
+) {
     let dev = rec.dev.clone();
-    let cached = get_pipeline(&dev, key, wgsl, entry, buffers.len());
-    let entries: Vec<wgpu::BindGroupEntry> = buffers
+    let cached = get_pipeline(&dev, key, wgsl, entry, storage.len(), uniform.len());
+    let entries: Vec<wgpu::BindGroupEntry> = storage
         .iter()
+        .chain(uniform.iter())
         .enumerate()
         .map(|(i, b)| wgpu::BindGroupEntry {
             binding: i as u32,
@@ -100,6 +133,20 @@ pub fn dispatch(
     pass.set_pipeline(&cached.pipeline);
     pass.set_bind_group(0, &bind_group, &[]);
     pass.dispatch_workgroups(workgroups[0], workgroups[1], workgroups[2]);
+}
+
+/// Create a small UNIFORM buffer initialized from `data` (padded to 16 bytes for `vec4`-style
+/// uniform reads). For passing scalar dims to a kernel as uniform values.
+pub fn uniform_u32(dev: &Arc<Device>, data: &[u32]) -> wgpu::Buffer {
+    let size = ((data.len() * 4).max(16) as u64 + 15) & !15;
+    let buf = dev.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("uniform"),
+        size,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    dev.queue.write_buffer(&buf, 0, bytemuck::cast_slice(data));
+    buf
 }
 
 /// Copy `n` 4-byte elements from `src` (element offset `src_off`) into `dst` (element offset
