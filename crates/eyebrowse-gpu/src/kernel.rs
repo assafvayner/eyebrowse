@@ -102,6 +102,19 @@ pub fn dispatch(
     pass.dispatch_workgroups(workgroups[0], workgroups[1], workgroups[2]);
 }
 
+/// Copy `n` 4-byte elements from `src` (element offset `src_off`) into `dst` (element offset
+/// `dst_off`) via a buffer-to-buffer copy — no shader dispatch. Used e.g. to slice the last
+/// hidden row before the LM head.
+pub fn copy_range(rec: &mut Recorder, src: &Tensor, dst: &Tensor, src_off: usize, dst_off: usize, n: usize) {
+    rec.encoder.copy_buffer_to_buffer(
+        &src.buffer,
+        (src_off * 4) as u64,
+        &dst.buffer,
+        (dst_off * 4) as u64,
+        (n * 4) as u64,
+    );
+}
+
 const ADD_WGSL: &str = r#"
 @group(0) @binding(0) var<storage, read_write> a: array<f32>;
 @group(0) @binding(1) var<storage, read_write> b: array<f32>;

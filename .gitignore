@@ -6,3 +6,6 @@ web/pkg/
 web/pkg-gpu/
 web/dist/
 *.safetensors
+/models/
+.venv/
+__pycache__/

@@ -10,7 +10,7 @@ mod tensor;
 mod wasm_demo;
 
 pub use device::Device;
-pub use kernel::{add, dispatch};
+pub use kernel::{add, copy_range, dispatch};
 pub use recorder::Recorder;
 pub use tensor::{pack_f16, Tensor};
 

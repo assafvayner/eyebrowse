@@ -1,0 +1,18 @@
+[package]
+name = "eyebrowse"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+eyebrowse-core = { path = "../eyebrowse-core" }
+eyebrowse-gpu = { path = "../eyebrowse-gpu" }
+eyebrowse-kernels = { path = "../eyebrowse-kernels" }
+eyebrowse-nn = { path = "../eyebrowse-nn" }
+eyebrowse-load = { path = "../eyebrowse-load" }
+eyebrowse-models = { path = "../eyebrowse-models" }
+tokenizers = { version = "0.20", default-features = false, features = ["onig"] }
+
+[dev-dependencies]
+pollster.workspace = true
+serde_json = "1"
