@@ -299,15 +299,19 @@ checksum = "d817e038c30374a4bcb22f94d0a8a0e216958d4c3dcde369b1439fec4bdda6e6"
 name = "eyebrowse"
 version = "0.1.0"
 dependencies = [
+ "console_error_panic_hook",
  "eyebrowse-core",
  "eyebrowse-gpu",
  "eyebrowse-kernels",
  "eyebrowse-load",
  "eyebrowse-models",
  "eyebrowse-nn",
+ "js-sys",
  "pollster",
  "serde_json",
  "tokenizers",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]
