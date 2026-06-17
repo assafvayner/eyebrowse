@@ -62,3 +62,68 @@ pub fn pack_f16(x: &[f32]) -> Vec<u32> {
 pub fn round_f16(x: &[f32]) -> Vec<f32> {
     x.iter().map(|v| half::f16::from_f32(*v).to_f32()).collect()
 }
+
+/// CPU reference for RMSNorm over rows of `[rows, dim]`.
+pub fn cpu_rmsnorm(x: &[f32], w: &[f32], rows: usize, dim: usize, eps: f32) -> Vec<f32> {
+    let mut out = vec![0.0f32; rows * dim];
+    for r in 0..rows {
+        let base = r * dim;
+        let mut ss = 0.0f32;
+        for i in 0..dim {
+            ss += x[base + i] * x[base + i];
+        }
+        let inv = 1.0 / ((ss / dim as f32) + eps).sqrt();
+        for i in 0..dim {
+            out[base + i] = x[base + i] * inv * w[i];
+        }
+    }
+    out
+}
+
+/// CPU reference for rotary position embedding, matching the kernel's half-split convention.
+/// `cos`/`sin` are `[seq, head_dim/2]`. `x` is `[seq, n_heads, head_dim]`.
+pub fn cpu_rope(
+    x: &[f32],
+    cos: &[f32],
+    sin: &[f32],
+    seq: usize,
+    n_heads: usize,
+    hd: usize,
+) -> Vec<f32> {
+    let half = hd / 2;
+    let mut out = x.to_vec();
+    for s in 0..seq {
+        for h in 0..n_heads {
+            let base = (s * n_heads + h) * hd;
+            for p in 0..half {
+                let c = cos[s * half + p];
+                let sn = sin[s * half + p];
+                let x1 = x[base + p];
+                let x2 = x[base + half + p];
+                out[base + p] = x1 * c - x2 * sn;
+                out[base + half + p] = x2 * c + x1 * sn;
+            }
+        }
+    }
+    out
+}
+
+/// CPU reference for numerically-stable row softmax over `[rows, cols]`.
+pub fn cpu_softmax(x: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; rows * cols];
+    for r in 0..rows {
+        let base = r * cols;
+        let mut m = f32::NEG_INFINITY;
+        for i in 0..cols {
+            m = m.max(x[base + i]);
+        }
+        let mut sum = 0.0f32;
+        for i in 0..cols {
+            sum += (x[base + i] - m).exp();
+        }
+        for i in 0..cols {
+            out[base + i] = (x[base + i] - m).exp() / sum;
+        }
+    }
+    out
+}
